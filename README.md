@@ -171,6 +171,26 @@ The rules mirror `output_widget`:
 
 Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a small helper script (`shiny-plotly.js`, loaded with every output) that observes each graph's container with a `ResizeObserver`, so a card that changes size without a window resize, for example when a sibling output renders below it, or when a sidebar collapses, re-lays the graph out. The same helper purges a graph once it leaves the document, which releases the window listener and layout state plotly would otherwise keep.
 
+### Dark mode
+
+Plotly does not follow Bootstrap's color mode by itself. Give the dark mode switch an id, read it in the render function to pick the template, and make the figure's backgrounds transparent so the card's own background shows through in both modes:
+
+```python
+app_ui = ui.page_fillable(
+    ui.input_dark_mode(id="mode"),
+    ui.card(output_plotly("sales")),
+)
+
+
+@render_plotly
+def sales():
+    template = "plotly_dark" if input.mode() == "dark" else "plotly"
+    fig = px.bar(df, x="month", y="total", template=template)
+    return fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+```
+
+Flipping the switch re-renders the figure through `Plotly.react`, the same as any other re-render. `input.mode()` is `"light"` or `"dark"` and follows the user's system preference when the switch is not given an initial `mode`.
+
 ### Events back to Shiny
 
 `events=` names the plotly events to forward; each arrives as `input.<id>_<event>`, namespaced like the output inside a module. Four are available: `click`, `hover`, `selected` and `relayout`.
@@ -293,7 +313,7 @@ make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check
 make bench       # the shinywidgets comparison above, on this machine
 ```
 
-`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `extend_traces`, `restyle` and `relayout` applied in place (rolling window, one trace or all, held until the first draw, reset by a re-render, inside a module, dropped with a warning for an unknown output), `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
+`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `extend_traces`, `restyle` and `relayout` applied in place (rolling window, one trace or all, held until the first draw, reset by a re-render, inside a module, dropped with a warning for an unknown output), `post_script` click wiring (once, not stacked), the dark mode recipe, error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
 
 ## License
 

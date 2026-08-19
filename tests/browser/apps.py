@@ -250,3 +250,24 @@ def make_live_app() -> App:
         live_mod_server("m")
 
     return App(app_ui, server)
+
+
+# --- dark mode ------------------------------------------------------------------------------
+
+
+def make_dark_app() -> App:
+    """The README recipe: template from the color mode input, transparent backgrounds."""
+    app_ui = ui.page_fillable(
+        ui.input_dark_mode(id="mode", mode="light"),
+        ui.card(output_plotly("sales")),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def sales():
+            template = "plotly_dark" if input.mode() == "dark" else "plotly"
+            fig = bars(3).update_layout(template=template)
+            # The page's background shows through, so the graph blends into the card.
+            return fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+
+    return App(app_ui, server)
