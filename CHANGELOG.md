@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/rvben/shiny-plotly/compare/v0.1.0...v0.2.0) - 2026-08-19
+
 ### Changed
 
 - `@render_plotly` is now a Shiny output binding instead of a `render.ui`: the figure travels as plotly JSON and `shiny-plotly.js` draws it with `Plotly.newPlot` the first time and `Plotly.react` on every re-render, into one graph div it keeps. Handlers attached by `post_script` stay attached (it runs once, not on every render), a figure with `layout.uirevision` keeps the user's zoom and pan across re-renders, a render error shows in place and `None` empties the output. Trace data is serialized by plotly's encoder, so numpy arrays, pandas columns and datetimes work as they do in `fig.to_json()`.
@@ -31,6 +33,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `figurewidget_margins=True` fills in unset margin sides with the values shinywidgets applies to a `FigureWidget` (l16/t32/r16/b16), for pixel-identical migrations.
 - `config` (merged over `{"responsive": True}`) and `post_script` (with `{plot_id}` substitution) options for forwarding plotly events to Shiny inputs.
 - Test suite: unit tests, in-process Shiny end-to-end tests over a real websocket, and a headless Chromium suite covering sizing, resize tracking, purge on re-render, full screen and `post_script` wiring.
-
-[Unreleased]: https://github.com/rvben/shiny-plotly/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/rvben/shiny-plotly/releases/tag/v0.1.0
