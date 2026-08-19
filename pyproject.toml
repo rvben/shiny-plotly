@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shiny-plotly"
+version = "0.1.0"
+description = "Render plotly figures in Shiny for Python as plain HTML, without the shinywidgets layer."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  { name = "Ruben J. Jongejan", email = "ruben.jongejan@gmail.com" },
+]
+keywords = ["shiny", "plotly", "dashboard", "render", "html"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Visualization",
+  "Typing :: Typed",
+]
+dependencies = [
+  "shiny>=1.0",
+  "plotly>=5.0",
+  "htmltools>=0.5",
+]
+
+[project.urls]
+Homepage   = "https://github.com/rvben/shiny-plotly"
+Repository = "https://github.com/rvben/shiny-plotly"
+Changelog  = "https://github.com/rvben/shiny-plotly/blob/main/CHANGELOG.md"
+Issues     = "https://github.com/rvben/shiny-plotly/issues"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+  "pyright>=1.1.380",
+  "httpx2>=2.12.0",
+  "pytest-playwright>=0.9.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shiny_plotly"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/shiny_plotly", "tests", "examples", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+markers = ["browser: drives the package in a real Chromium through playwright"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests", "examples"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+
+[tool.ruff.lint.isort]
+known-local-folder = ["newplot"]
