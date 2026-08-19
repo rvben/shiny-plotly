@@ -17,7 +17,7 @@ jobs:
   verify:
     name: Verify the tagged commit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
@@ -41,6 +41,7 @@ jobs:
       - run: make test
       - run: make browsers PLAYWRIGHT_ARGS=--with-deps
       - run: make test-browser
+      - run: make check-floor
 
   build:
     name: Build

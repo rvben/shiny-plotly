@@ -1,5 +1,5 @@
-.PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel bench \
-	check version check-version release-notes publish clean release-patch release-minor release-major
+.PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
+	check-floor bench check version check-version release-notes publish clean release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
 
@@ -53,7 +53,26 @@ check-wheel: build
 		--rootdir=.. -c ../pyproject.toml .
 	rm -rf .wheel-venv
 
-check: lock-check lint typecheck test test-browser check-wheel
+# Installs the package with every direct dependency at the oldest version pyproject.toml
+# allows (uv's lowest-direct resolution: plotly, shiny, htmltools at their floor, the rest
+# as resolved from there) into a throwaway venv and runs the whole suite, browser included,
+# so the declared bounds are tested rather than hoped. The test tools are installed in a
+# second step at their current versions; none of them depends on the three. Needs
+# Chromium for that venv's playwright, which the target installs.
+check-floor:
+	rm -rf .floor-venv
+	uv venv --quiet .floor-venv
+	uv pip install --quiet --python .floor-venv/bin/python --resolution lowest-direct .
+	uv pip install --quiet --python .floor-venv/bin/python pytest pytest-asyncio httpx2 \
+		pytest-playwright numpy
+	.floor-venv/bin/python -c "import plotly, shiny, htmltools; \
+		print('plotly', plotly.__version__, 'shiny', shiny.__version__, 'htmltools', htmltools.__version__)"
+	.floor-venv/bin/python -m playwright install $(PLAYWRIGHT_ARGS) chromium
+	cd tests && ../.floor-venv/bin/python -m pytest -q -p no:cacheprovider \
+		--rootdir=.. -c ../pyproject.toml .
+	rm -rf .floor-venv
+
+check: lock-check lint typecheck test test-browser check-wheel check-floor
 
 # Measures shinywidgets against this package on identical apps (bench/run.py) and
 # prints a Markdown table; raw numbers land in bench/results.json. Needs the bench
@@ -90,7 +109,7 @@ publish:
 	uv publish --trusted-publishing always --check-url https://pypi.org/simple/shiny-plotly/ dist/*
 
 clean:
-	rm -rf dist tmp .wheel-venv .pytest_cache .ruff_cache
+	rm -rf dist tmp .wheel-venv .floor-venv .pytest_cache .ruff_cache
 
 release-patch:
 	vership bump patch

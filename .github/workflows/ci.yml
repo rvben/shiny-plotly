@@ -16,7 +16,9 @@ jobs:
   checks:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Generous: `playwright install --with-deps` fetches fonts from the Ubuntu mirror,
+    # which has taken over ten minutes on a slow day.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -57,14 +59,31 @@ jobs:
       - name: Build the wheel and test against it
         run: make check-wheel
 
+  # The oldest plotly, shiny and htmltools the package declares, on the oldest Python.
+  floor:
+    name: Oldest supported dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.5"
+          python-version: "3.10"
+          enable-cache: true
+
+      - name: Install and test at the dependency floor
+        run: make check-floor PLAYWRIGHT_ARGS=--with-deps
+
   # Single required status for branch protection.
   all-checks-passed:
     name: All checks passed
-    needs: checks
+    needs: [checks, floor]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any check failed
-        if: needs.checks.result != 'success'
+        if: needs.checks.result != 'success' || needs.floor.result != 'success'
         run: exit 1
       - run: echo "All checks passed"

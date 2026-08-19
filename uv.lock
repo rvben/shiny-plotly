@@ -1577,8 +1577,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "brotli", marker = "extra == 'brotli'", specifier = ">=1.1" },
-    { name = "htmltools", specifier = ">=0.5" },
-    { name = "plotly", specifier = ">=5.0" },
+    { name = "htmltools", specifier = ">=0.5.2" },
+    { name = "plotly", specifier = ">=5.5" },
     { name = "shiny", specifier = ">=1.0" },
 ]
 provides-extras = ["brotli"]

@@ -255,11 +255,11 @@ uv run --with shiny-plotly shiny run examples/express_app.py
 ```sh
 make sync        # uv sync --all-groups
 make browsers    # playwright install chromium, once
-make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check
+make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check, floor check
 make bench       # the shinywidgets comparison above, on this machine
 ```
 
-`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested.
+`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
 
 ## License
 

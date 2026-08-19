@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### Added
 
 - `@render_plotly(events=...)` forwards plotly events to Shiny inputs: any of `click`, `hover`, `selected` and `relayout` arrive as `input.<id>_<event>` (namespaced inside a module), carrying plotly's event data cut to what serializes (`points` with each point's scalar fields plus `customdata`, `bbox`, `pointNumbers`; `range` or `lassoPoints` for selections; relayout data as is). A click fires on every click; hover is debounced and becomes `None` when the pointer leaves; a deselect sets `selected` to `None`. Handlers attach once per graph div and survive re-renders.
@@ -17,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `output_plotly(id)` (and the Express auto output) did not namespace its id inside a Shiny module, so a `@render_plotly` in a module never found its output.
+- The declared dependency floor was wrong: `plotly>=5.0` and `htmltools>=0.5` could not work (`fig_to_ui` needs `to_html(div_id=...)`, which plotly 5.5 introduced; shiny 1.0 itself needs htmltools 0.5.2). The bounds are now `plotly>=5.5`, `htmltools>=0.5.2`, and CI installs exactly that floor (with shiny 1.0) and runs the whole suite against it, browser tests included (`make check-floor`).
 
 ## [0.2.0](https://github.com/rvben/shiny-plotly/compare/v0.1.0...v0.2.0) - 2026-08-19
 

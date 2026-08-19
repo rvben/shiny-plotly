@@ -203,7 +203,7 @@ def test_sync_figure_is_sent_as_figure_json_for_the_browser_helper_to_draw(value
 
 
 def test_figure_json_is_plotly_serialised_not_shiny_serialised():
-    """numpy arrays only survive plotly's encoder, which also packs them as compact bdata."""
+    """numpy arrays only survive plotly's encoder; plotly 6 also packs them as compact bdata."""
     np = pytest.importorskip("numpy")
 
     app_ui = ui.page_fluid(output_plotly("fig"))
@@ -217,8 +217,12 @@ def test_figure_json_is_plotly_serialised_not_shiny_serialised():
         value = flush_one(client, "fig")
 
     trace = json.loads(value["figure"])["data"][0]
-    assert trace["x"] == {"dtype": "i1", "bdata": "AAEC"}
-    assert trace["y"] == {"dtype": "f8", "bdata": "AAAAAAAA+D8AAAAAAAAEQAAAAAAAAAxA"}
+    if int(plotly.__version__.split(".")[0]) >= 6:
+        assert trace["x"] == {"dtype": "i1", "bdata": "AAEC"}
+        assert trace["y"] == {"dtype": "f8", "bdata": "AAAAAAAA+D8AAAAAAAAEQAAAAAAAAAxA"}
+    else:
+        assert trace["x"] == [0, 1, 2]
+        assert trace["y"] == [1.5, 2.5, 3.5]
 
 
 def test_async_render_function_is_awaited(values):

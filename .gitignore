@@ -1,5 +1,6 @@
 .venv/
 .wheel-venv/
+.floor-venv/
 dist/
 __pycache__/
 *.pyc

@@ -275,7 +275,7 @@ def test_the_bundle_arrives_compressed_and_immutable_for_the_next_visitor(
 
     assert headers["content-encoding"] in ("br", "gzip")
     assert headers["cache-control"] == "public, max-age=31536000, immutable"
-    assert fresh["decoded"] > 4_000_000
+    assert fresh["decoded"] == _serve.bundle().size, "the whole bundle, whichever plotly"
     assert fresh["encoded"] < fresh["decoded"] // 3, "brotli or gzip on the wire"
     assert fresh["transfer"] > fresh["encoded"], "headers plus the compressed body"
     # Chromium would keep a freshly installed bundle for a while on heuristics alone; the
