@@ -19,9 +19,14 @@ def plotly_js() -> HTMLDependency:
     copied or written: the dependency points at ``plotly/package_data/plotly.min.js``,
     the exact bundle ``plotly.offline.get_plotlyjs()`` would inline.
 
-    Add it once to the page UI so the bundle loads with the page. Every figure rendered by
-    :func:`~shiny_plotly.render_plotly` or :func:`~shiny_plotly.fig_to_ui` also carries it,
-    so an output still works without the page-level call; htmltools de-duplicates.
+    Every :func:`~shiny_plotly.output_plotly` and every :func:`~shiny_plotly.fig_to_ui`
+    fragment carries it, so nothing needs to be added to the page for it; htmltools
+    de-duplicates. Add it to the page UI yourself only when the first figure is inserted
+    later (``ui.insert_ui``, a ``@render.ui`` that starts empty) and the bundle should load
+    with the page instead.
+
+    Once a session has rendered a figure, the bundle is served pre-compressed with an
+    immutable cache lifetime; see :mod:`shiny_plotly._serve`.
     """
     return HTMLDependency(
         name="plotly",
@@ -33,11 +38,12 @@ def plotly_js() -> HTMLDependency:
 
 def shiny_plotly_js() -> HTMLDependency:
     """
-    The small browser helper every rendered figure depends on.
+    The small browser helper every output and fragment depends on.
 
-    It keeps each graph sized to its container (plotly alone only reacts to window
-    resizes) and purges a graph once Shiny has replaced the output holding it, so
-    re-rendering outputs do not accumulate plotly state. It rides along with every
+    It holds the output binding for :func:`~shiny_plotly.output_plotly` (``Plotly.newPlot``
+    once, ``Plotly.react`` on every re-render), keeps each graph sized to its container
+    (plotly alone only reacts to window resizes) and purges a graph once it leaves the
+    document, so nothing accumulates plotly state. It rides along with every output and
     fragment; there is no need to add it to the page yourself.
     """
     return HTMLDependency(

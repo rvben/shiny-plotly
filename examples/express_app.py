@@ -9,10 +9,9 @@ from itertools import accumulate
 import plotly.graph_objects as go
 from shiny.express import input, ui
 
-from shiny_plotly import plotly_js, render_plotly
+from shiny_plotly import render_plotly
 
 ui.page_opts(title="shiny-plotly (Express)", fillable=True)
-plotly_js()
 
 with ui.sidebar():
     ui.input_slider("n", "Points", min=10, max=500, value=100)

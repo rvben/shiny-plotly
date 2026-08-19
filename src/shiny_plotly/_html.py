@@ -10,6 +10,7 @@ from htmltools import HTML, Tag, TagList, css, tags
 from plotly.basedatatypes import BaseFigure
 
 from ._deps import plotly_js, shiny_plotly_js
+from ._serve import enable_for_current_session
 
 __all__ = ("FIGUREWIDGET_MARGINS", "fig_to_ui")
 
@@ -18,14 +19,14 @@ __all__ = ("FIGUREWIDGET_MARGINS", "fig_to_ui")
 # keep its exact look. Plotly's own defaults are l80/t100/r80/b80.
 FIGUREWIDGET_MARGINS: Mapping[str, int] = MappingProxyType({"l": 16, "t": 32, "r": 16, "b": 16})
 
-_DEFAULT_CONFIG: Mapping[str, Any] = MappingProxyType({"responsive": True})
+DEFAULT_CONFIG: Mapping[str, Any] = MappingProxyType({"responsive": True})
 
 # Height of a filling container when nothing constrains it, and its flex basis inside a
 # fill layout; the same 400px shinywidgets gives a FigureWidget.
 _FILL_BASIS = "400px"
 
 # Runs right after Plotly.newPlot resolves: hands the graph div to the browser helper
-# (shiny-plotly.js), which tracks its size and purges it when Shiny replaces the output.
+# (shiny-plotly.js), which tracks its size and purges it once it leaves the document.
 _TRACK_SCRIPT = "window.shinyPlotly && shinyPlotly.track(document.getElementById('{plot_id}'));"
 
 Figure = BaseFigure | dict[str, Any]
@@ -45,6 +46,11 @@ def fig_to_ui(
     """
     Turn a plotly figure into a Shiny UI fragment that draws it with ``Plotly.newPlot``.
 
+    This is the lower-level path for a ``@render.ui`` that composes a figure with other
+    UI, or for any htmltools context; each render draws a fresh graph. An output that is
+    only a figure is better served by :class:`~shiny_plotly.render_plotly`, which keeps
+    the graph across re-renders.
+
     Parameters
     ----------
     fig
@@ -53,9 +59,9 @@ def fig_to_ui(
         DOM id of the plotly graph div. A fresh id is generated when omitted.
     height
         CSS height of the plot. ``None`` (the default) fills the parent: inside a fill
-        layout (``ui.card(full_screen=True)``, a fillable page, ``output_plotly``) the plot
-        grows and shrinks with it from a 400px basis; anywhere else it is 400px tall. A
-        value such as ``"300px"`` fixes the height and opts out of filling, exactly like
+        layout (``ui.card(full_screen=True)``, a fillable page) the plot grows and shrinks
+        with it from a 400px basis; anywhere else it is 400px tall. A value such as
+        ``"300px"`` fixes the height and opts out of filling, exactly like
         ``output_widget(height=...)`` does in shinywidgets.
     width
         CSS width of the plot, ``"100%"`` by default.
@@ -71,9 +77,10 @@ def fig_to_ui(
     """
     if fig is None:
         return None
-    fig_dict = _as_fig_dict(fig)
+    enable_for_current_session()
+    fig_dict = as_fig_dict(fig)
     if figurewidget_margins:
-        _fill_in_margins(fig_dict)
+        fill_in_margins(fig_dict)
     if div_id is None:
         div_id = "plotly-" + uuid.uuid4().hex
 
@@ -84,7 +91,7 @@ def fig_to_ui(
         include_plotlyjs=False,
         include_mathjax=False,
         div_id=div_id,
-        config={**_DEFAULT_CONFIG, **(config or {})},
+        config={**DEFAULT_CONFIG, **(config or {})},
         post_script=[_TRACK_SCRIPT, post_script] if post_script else [_TRACK_SCRIPT],
     )
     container: Tag = tags.div(
@@ -95,7 +102,7 @@ def fig_to_ui(
     return TagList(plotly_js(), shiny_plotly_js(), container)
 
 
-def _as_fig_dict(fig: Figure) -> dict[str, Any]:
+def as_fig_dict(fig: Figure) -> dict[str, Any]:
     # Figure.to_dict() does no validation (the figure was validated when built), and a
     # dict is passed through as the caller's JSON; pio.to_html gets validate=False so it
     # never reconstructs a Figure from it.
@@ -104,10 +111,10 @@ def _as_fig_dict(fig: Figure) -> dict[str, Any]:
     if isinstance(fig, dict):
         return {**fig, "layout": dict(fig.get("layout") or {})}
     raise TypeError(
-        f"fig_to_ui() expects a plotly go.Figure (or its dict), got {type(fig).__name__}"
+        f"shiny-plotly expects a plotly go.Figure (or its dict), got {type(fig).__name__}"
     )
 
 
-def _fill_in_margins(fig_dict: dict[str, Any]) -> None:
+def fill_in_margins(fig_dict: dict[str, Any]) -> None:
     layout = fig_dict.setdefault("layout", {})
     layout["margin"] = {**FIGUREWIDGET_MARGINS, **(layout.get("margin") or {})}

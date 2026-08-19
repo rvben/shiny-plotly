@@ -1,3 +1,5 @@
+import json
+
 import plotly
 import plotly.graph_objects as go
 import pytest
@@ -6,8 +8,6 @@ from shiny.render.renderer import Renderer
 from starlette.testclient import TestClient
 
 from shiny_plotly import __version__, output_plotly, plotly_js, render_plotly
-
-from newplot import parse_newplot
 
 
 def bar() -> go.Figure:
@@ -37,7 +37,7 @@ def test_parenthesised_decorator_keeps_the_output_id_and_records_options():
     assert sales.config == {"displaylogo": False}
 
 
-def test_express_auto_output_ui_is_a_fill_aware_output_ui_with_the_output_id():
+def test_express_auto_output_ui_is_the_plotly_output_with_the_output_id():
     @render_plotly
     def sales():
         return bar()
@@ -45,24 +45,34 @@ def test_express_auto_output_ui_is_a_fill_aware_output_ui_with_the_output_id():
     tag = sales.auto_output_ui()
 
     assert tag.attrs["id"] == "sales"
-    assert tag.has_class("shiny-html-output")
+    assert tag.has_class("shiny-plotly-output")
     assert tag.has_class("html-fill-item")
     assert tag.has_class("html-fill-container")
 
 
-def test_output_plotly_is_a_fill_aware_output_ui():
+def test_output_plotly_is_a_fill_aware_output_bound_by_the_browser_helper():
     tag = output_plotly("sales")
 
     assert tag.attrs["id"] == "sales"
-    assert tag.has_class("shiny-html-output")
+    assert tag.has_class("shiny-plotly-output"), "the class the output binding finds"
+    assert not tag.has_class("shiny-html-output"), "not an output_ui: values are figures"
     assert tag.has_class("html-fill-item")
     assert tag.has_class("html-fill-container")
+
+
+def test_output_plotly_carries_the_bundle_and_the_helper_so_no_page_level_call_is_needed():
+    deps = output_plotly("sales").get_dependencies()
+
+    assert [(d.name, str(d.version)) for d in deps] == [
+        ("plotly", plotly.__version__),
+        ("shiny-plotly", __version__),
+    ]
 
 
 def test_output_plotly_with_a_height_is_a_fixed_size_fill_container():
     tag = output_plotly("sales", height="220px", width="400px")
 
-    assert tag.has_class("html-fill-container"), "the fragment inside still fills the output"
+    assert tag.has_class("html-fill-container"), "the graph inside still fills the output"
     assert not tag.has_class("html-fill-item"), "a fill item would not keep its 220px"
     assert "height:220px" in str(tag.attrs["style"]).replace(" ", "")
     assert "width:400px" in str(tag.attrs["style"]).replace(" ", "")
@@ -93,7 +103,13 @@ def make_app() -> App:
         def empty_fig():
             return None
 
-        @render_plotly(figurewidget_margins=True, height="250px")
+        @render_plotly(
+            figurewidget_margins=True,
+            height="250px",
+            width="300px",
+            config={"displaylogo": False},
+            post_script="console.log('{plot_id}')",
+        )
         def parity_fig():
             return bar()
 
@@ -127,34 +143,67 @@ def values() -> dict:
         return first_flush(client)
 
 
-def test_sync_figure_renders_as_newplot_html_with_the_plotly_dependency(values):
-    rendered = values["sync_fig"]
+def test_sync_figure_is_sent_as_figure_json_for_the_browser_helper_to_draw(values):
+    value = values["sync_fig"]
 
-    call = parse_newplot(rendered["html"])
-    assert call.data[0]["type"] == "bar"
-    assert call.div_id == "sync_fig-plotly"
-    assert [(d["name"], d["version"]) for d in rendered["deps"]] == [
-        ("plotly", plotly.__version__),
-        ("shiny-plotly", __version__),
-    ]
+    figure = json.loads(value["figure"])
+    assert figure["data"][0]["type"] == "bar"
+    assert figure["data"][0]["x"] == ["a", "b"]
+    assert "layout" in figure
+    assert value["config"] == {"responsive": True}
+    assert value["height"] is None
+    assert value["width"] == "100%"
+    assert value["post_script"] is None
+
+
+def test_figure_json_is_plotly_serialised_not_shiny_serialised():
+    """numpy arrays only survive plotly's encoder, which also packs them as compact bdata."""
+    np = pytest.importorskip("numpy")
+
+    app_ui = ui.page_fluid(output_plotly("fig"))
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def fig():
+            return go.Figure(go.Scatter(x=np.arange(3), y=np.array([1.5, 2.5, 3.5])))
+
+    with TestClient(App(app_ui, server)) as client:
+        value = flush_one(client, "fig")
+
+    trace = json.loads(value["figure"])["data"][0]
+    assert trace["x"] == {"dtype": "i1", "bdata": "AAEC"}
+    assert trace["y"] == {"dtype": "f8", "bdata": "AAAAAAAA+D8AAAAAAAAEQAAAAAAAAAxA"}
 
 
 def test_async_render_function_is_awaited(values):
-    call = parse_newplot(values["async_fig"]["html"])
+    figure = json.loads(values["async_fig"]["figure"])
 
-    assert call.layout["title"]["text"] == "async"
+    assert figure["layout"]["title"]["text"] == "async"
 
 
 def test_none_renders_as_an_empty_output(values):
     assert values["empty_fig"] is None
 
 
-def test_renderer_options_reach_the_fragment(values):
-    html = values["parity_fig"]["html"]
+def test_renderer_options_reach_the_value(values):
+    value = values["parity_fig"]
 
-    assert parse_newplot(html).layout["margin"] == {"l": 16, "t": 32, "r": 16, "b": 16}
-    assert "height:250px" in html.replace(" ", "")
-    assert 'class="shiny-plotly"' in html
+    assert json.loads(value["figure"])["layout"]["margin"] == {"l": 16, "t": 32, "r": 16, "b": 16}
+    assert value["height"] == "250px"
+    assert value["width"] == "300px"
+    assert value["config"] == {"responsive": True, "displaylogo": False}
+    assert value["post_script"] == "console.log('{plot_id}')"
+
+
+def flush_one(client: TestClient, output_id: str) -> dict:
+    with client.websocket_connect("/websocket/") as ws:
+        ws.receive_json()
+        ws.send_json({"method": "init", "data": {f".clientdata_output_{output_id}_hidden": False}})
+        for _ in range(50):
+            msg = ws.receive_json()
+            if "values" in msg and output_id in msg["values"]:
+                return msg["values"][output_id]
+        pytest.fail("no output values flushed after init")
 
 
 def test_plotly_bundle_is_served_from_the_page_level_dependency():
@@ -166,17 +215,7 @@ def test_plotly_bundle_is_served_from_the_page_level_dependency():
     assert len(resp.content) > 1_000_000
 
 
-def test_helper_script_is_served_once_an_output_has_rendered():
-    with TestClient(make_app()) as client:
-        first_flush(client)
-        resp = client.get(f"/lib/shiny-plotly-{__version__}/shiny-plotly.js")
-
-    assert resp.status_code == 200
-    assert b"ResizeObserver" in resp.content
-    assert b"Plotly.purge(" in resp.content
-
-
-def test_plotly_bundle_is_served_from_the_rendered_dependency_without_a_page_level_call():
+def test_bundle_and_helper_are_served_from_the_output_tag_without_a_page_level_call():
     app_ui = ui.page_fluid(output_plotly("fig"))
 
     def server(input: Inputs, output: Outputs, session: Session):
@@ -184,21 +223,12 @@ def test_plotly_bundle_is_served_from_the_rendered_dependency_without_a_page_lev
         def fig():
             return bar()
 
-    with (
-        TestClient(App(app_ui, server)) as client,
-        client.websocket_connect("/websocket/") as ws,
-    ):
-        ws.receive_json()
-        ws.send_json({"method": "init", "data": {".clientdata_output_fig_hidden": False}})
-        for _ in range(50):
-            msg = ws.receive_json()
-            if "values" in msg and "fig" in msg["values"]:
-                break
-        else:
-            pytest.fail("no output values flushed after init")
-        src = msg["values"]["fig"]["deps"][0]["script"][0]["src"]
-        resp = client.get(f"/{src}")
+    with TestClient(App(app_ui, server)) as client:
+        bundle = client.get(f"/lib/plotly-{plotly.__version__}/plotly.min.js")
+        helper = client.get(f"/lib/shiny-plotly-{__version__}/shiny-plotly.js")
 
-    assert src == f"lib/plotly-{plotly.__version__}/plotly.min.js"
-    assert resp.status_code == 200
-    assert len(resp.content) > 1_000_000
+    assert bundle.status_code == 200
+    assert len(bundle.content) > 1_000_000
+    assert helper.status_code == 200
+    assert b"ResizeObserver" in helper.content
+    assert b"Plotly.react(" in helper.content

@@ -9,7 +9,7 @@ from itertools import accumulate
 import plotly.graph_objects as go
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
 
-from shiny_plotly import output_plotly, plotly_js, render_plotly
+from shiny_plotly import output_plotly, render_plotly
 
 # Forwards plotly click events to a Shiny input. {plot_id} is the graph div's id.
 CLICK_TO_INPUT = """
@@ -41,7 +41,6 @@ app_ui = ui.page_sidebar(
         ui.card_header("Fixed height, click a point"),
         output_plotly("fixed_plot"),
     ),
-    plotly_js(),
     title="shiny-plotly",
     fillable=True,
 )
@@ -61,7 +60,8 @@ def server(input: Inputs, output: Outputs, session: Session):
             trace = go.Scatter(x=x, y=y, mode="lines")
         else:
             trace = go.Bar(x=x, y=y)
-        return go.Figure(trace).update_layout(title=f"{input.n()} points")
+        # uirevision keeps the zoom the user dragged across re-renders of the same kind.
+        return go.Figure(trace).update_layout(title=f"{input.n()} points", uirevision=input.kind())
 
     @render_plotly(figurewidget_margins=True)
     def compact_plot():

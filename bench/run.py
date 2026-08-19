@@ -10,7 +10,12 @@ What is measured, and why these:
 - Page load: bytes over HTTP and over the Shiny websocket until the first figure is on
   screen, and the request count; once on a first visit and once more on a repeat visit
   in the same browser context, where static files come from the browser cache and only
-  what travels over the websocket is paid again. Deterministic up to compression.
+  what travels over the websocket is paid again. Deterministic up to compression. Each
+  server gets one warm-up visit first, from a throwaway browser context, so what is
+  measured is what every visitor after the first sees: shiny-plotly installs its
+  compressed, immutable route for plotly.min.js when the first session starts, and the
+  page load that started that session has already fetched the bundle from Shiny's own
+  static mount by then.
 - Re-render round trip: slider change to the new trace in the DOM, reported as the
   median and p90 of N runs. The least stable number; the load average at the time of
   the run is recorded next to it.
@@ -39,14 +44,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import (
-    Browser,
-    BrowserContext,
-    Page,
-    Request,
-    WebSocket,
-    sync_playwright,
-)
+from playwright.sync_api import Browser, BrowserContext, Page, WebSocket, sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
 HOST = "127.0.0.1"
@@ -108,28 +106,36 @@ class Server:
 class Traffic:
     http_bytes: int = 0
     http_requests: int = 0
+    http_requests_on_wire: int = 0
     plotly_js_bytes: int = 0
     ws_received: int = 0
     ws_sent: int = 0
 
 
+# What the page fetched over HTTP, from the browser's own Resource Timing: transferSize is
+# headers plus the encoded body as they crossed the wire, and 0 for a cache hit. (Playwright's
+# request.sizes() reports header bytes for cache hits too, which overstates a warm visit.)
+HTTP_TRAFFIC = """() => {
+  const entries = [
+    ...performance.getEntriesByType('navigation'),
+    ...performance.getEntriesByType('resource'),
+  ];
+  const plotly = entries.find(e => e.name.split('?')[0].endsWith('/plotly.min.js'));
+  return {
+    http_bytes: entries.reduce((n, e) => n + e.transferSize, 0),
+    http_requests: entries.length,
+    http_requests_on_wire: entries.filter(e => e.transferSize > 0).length,
+    plotly_js_bytes: plotly ? plotly.transferSize : 0,
+  };
+}"""
+
+
 class Meter:
-    """Counts every byte a page pulls over HTTP and over websockets."""
+    """Counts every byte a page exchanges over websockets."""
 
     def __init__(self, page: Page) -> None:
         self.traffic = Traffic()
-        page.on("requestfinished", self._on_request)
         page.on("websocket", self._on_websocket)
-
-    def _on_request(self, request: Request) -> None:
-        sizes = request.sizes()
-        # Responses served from the browser cache report -1; nothing crossed the wire.
-        total = max(0, sizes["responseBodySize"]) + max(0, sizes["responseHeadersSize"])
-        t = self.traffic
-        t.http_requests += 1
-        t.http_bytes += total
-        if request.url.split("?")[0].endswith(("plotly.min.js", "plotly.js")):
-            t.plotly_js_bytes += total
 
     def _on_websocket(self, ws: WebSocket) -> None:
         ws.on("framereceived", lambda payload: self._count("ws_received", payload))
@@ -168,13 +174,38 @@ def load_page(context: BrowserContext, url: str) -> tuple[Page, Meter, dict[str,
     page.wait_for_function(PLOT_READY, arg=100, timeout=30_000)
     first_plot = time.perf_counter() - t0
     page.wait_for_timeout(500)
-    return page, meter, {**asdict(meter.snapshot()), "time_to_first_plot_s": first_plot}
+    traffic = {**asdict(meter.snapshot()), **page.evaluate(HTTP_TRAFFIC)}
+    return page, meter, {**traffic, "time_to_first_plot_s": first_plot}
+
+
+def warm_up(browser: Browser, url: str) -> None:
+    """One visit from a throwaway context, then wait for any background work it started.
+
+    The wait is on the plotly bundle being served compressed, which is the visible end of
+    shiny-plotly's one-off compression; an app that never serves the bundle over HTTP
+    (shinywidgets ships it over the websocket) returns at once.
+    """
+    context = browser.new_context()
+    try:
+        page = context.new_page()
+        page.goto(url)
+        page.wait_for_function(PLOT_READY, arg=100, timeout=30_000)
+        bundle = f"{url}lib/plotly-{version('plotly')}/plotly.min.js"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            resp = context.request.get(bundle, headers={"Accept-Encoding": "gzip, br"})
+            if resp.status != 200 or "content-encoding" in resp.headers:
+                return
+            time.sleep(0.2)
+    finally:
+        context.close()
 
 
 def measure_app(name: str, app: str, browser: Browser, renders: int) -> AppResult:
     result = AppResult(name)
     server = Server(app)
     try:
+        warm_up(browser, server.url)
         context = browser.new_context()
         page, meter, result.page_load = load_page(context, server.url)
         # Same browser context, so the static files are cached; this page is closed again
@@ -305,6 +336,11 @@ def report(env: dict[str, Any], footprint: dict[str, Any], apps: list[AppResult]
             str(p.page_load["http_requests"]),
         ),
         (
+            "First visit, plotly.js over HTTP",
+            fmt_bytes(w.page_load["plotly_js_bytes"]),
+            fmt_bytes(p.page_load["plotly_js_bytes"]),
+        ),
+        (
             "First visit, time to the first figure",
             fmt_ms(w.page_load["time_to_first_plot_s"]),
             fmt_ms(p.page_load["time_to_first_plot_s"]),
@@ -313,6 +349,11 @@ def report(env: dict[str, Any], footprint: dict[str, Any], apps: list[AppResult]
             "Repeat visit (warm browser cache), bytes to the first figure",
             wire(w.repeat_visit),
             wire(p.repeat_visit),
+        ),
+        (
+            "Repeat visit, HTTP requests that left the cache",
+            str(w.repeat_visit["http_requests_on_wire"]),
+            str(p.repeat_visit["http_requests_on_wire"]),
         ),
         (
             "Websocket bytes per re-render (median)",
@@ -334,8 +375,9 @@ def report(env: dict[str, Any], footprint: dict[str, Any], apps: list[AppResult]
         "| --- | --- | --- |",
         *(f"| {label} | {a} | {b} |" for label, a, b in rows),
         "",
-        "Both stacks need plotly.js in the browser. shiny-plotly loads plotly.min.js "
-        f"({fmt_bytes(p.page_load['plotly_js_bytes'])}) as a static file the browser caches; "
+        "Both stacks need plotly.js in the browser. shiny-plotly serves plotly.min.js "
+        f"compressed ({fmt_bytes(p.page_load['plotly_js_bytes'])} on the wire) with a "
+        "year-long immutable cache lifetime, so a repeat visit does not ask for it again; "
         "shinywidgets (plotly's FigureWidget is an anywidget) sends plotly's widget bundle as "
         "part of the widget state over the websocket, for every new FigureWidget, which is "
         "why its repeat-visit and per-re-render bytes stay where they are. shinywidgets also "

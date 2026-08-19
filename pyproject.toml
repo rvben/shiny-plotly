@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "shiny-plotly"
 version = "0.1.0"
-description = "Render plotly figures in Shiny for Python as plain HTML, without the shinywidgets layer."
+description = "Render plotly figures in Shiny for Python with plain plotly.js, without the shinywidgets layer."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -31,6 +31,10 @@ dependencies = [
   "htmltools>=0.5",
 ]
 
+[project.optional-dependencies]
+# plotly.min.js is served brotli-compressed (about 15% smaller than gzip) when present.
+brotli = ["brotli>=1.1"]
+
 [project.urls]
 Homepage   = "https://github.com/rvben/shiny-plotly"
 Repository = "https://github.com/rvben/shiny-plotly"
@@ -49,6 +53,8 @@ dev = [
   "pyright>=1.1.380",
   "httpx2>=2.12.0",
   "pytest-playwright>=0.9.0",
+  "numpy>=1.26",
+  "brotli>=1.1",
 ]
 
 [tool.hatch.build.targets.wheel]

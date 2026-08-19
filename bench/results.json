@@ -4,7 +4,7 @@
     "python": "3.13.5",
     "platform": "Darwin arm64",
     "chromium": "151.0.7922.34",
-    "load_average_1m": 5.9150390625,
+    "load_average_1m": 6.599609375,
     "versions": {
       "shiny": "1.7.0",
       "plotly": "6.9.0",
@@ -22,63 +22,67 @@
     "shinywidgets": {
       "packages": 57,
       "site_packages_bytes": 110681838,
-      "import_s_median": 0.3563607078976929
+      "import_s_median": 0.5355438329279423
     },
     "shiny-plotly": {
       "packages": 34,
-      "site_packages_bytes": 72888592,
-      "import_s_median": 0.2525564171373844
+      "site_packages_bytes": 72902204,
+      "import_s_median": 0.44486241694539785
     }
   },
   "apps": [
     {
       "name": "shinywidgets",
       "page_load": {
-        "http_bytes": 5279927,
-        "http_requests": 24,
+        "http_bytes": 5281168,
+        "http_requests": 23,
+        "http_requests_on_wire": 23,
         "plotly_js_bytes": 0,
         "ws_received": 5342191,
         "ws_sent": 26186,
-        "time_to_first_plot_s": 1.588399125263095
+        "time_to_first_plot_s": 1.616342084016651
       },
       "repeat_visit": {
-        "http_bytes": 9800,
-        "http_requests": 24,
+        "http_bytes": 4441,
+        "http_requests": 23,
+        "http_requests_on_wire": 1,
         "plotly_js_bytes": 0,
         "ws_received": 5342191,
         "ws_sent": 26186,
-        "time_to_first_plot_s": 1.3216208750382066
+        "time_to_first_plot_s": 1.5230912081897259
       },
       "rerender": {
         "runs": 50,
-        "median_s": 1.1001854171045125,
-        "p90_s": 1.3045521794818342,
-        "ws_bytes_median": 5351481.0
+        "median_s": 1.4238950416911393,
+        "p90_s": 2.154635579418391,
+        "ws_bytes_median": 5351533.5
       }
     },
     {
       "name": "shiny-plotly",
       "page_load": {
-        "http_bytes": 6195799,
-        "http_requests": 20,
-        "plotly_js_bytes": 4853463,
-        "ws_received": 9746,
+        "http_bytes": 2567670,
+        "http_requests": 21,
+        "http_requests_on_wire": 21,
+        "plotly_js_bytes": 1217439,
+        "ws_received": 8760,
         "ws_sent": 351,
-        "time_to_first_plot_s": 0.7224395000375807
+        "time_to_first_plot_s": 0.6446431665681303
       },
       "repeat_visit": {
-        "http_bytes": 8544,
-        "http_requests": 20,
-        "plotly_js_bytes": 505,
-        "ws_received": 9746,
+        "http_bytes": 4152,
+        "http_requests": 21,
+        "http_requests_on_wire": 1,
+        "plotly_js_bytes": 0,
+        "ws_received": 8760,
         "ws_sent": 351,
-        "time_to_first_plot_s": 0.6404417078010738
+        "time_to_first_plot_s": 0.6297282502055168
       },
       "rerender": {
         "runs": 50,
-        "median_s": 0.01349079143255949,
-        "p90_s": 0.01601492934860289,
-        "ws_bytes_median": 10874.5
+        "median_s": 0.012080749962478876,
+        "p90_s": 0.016147220926359295,
+        "ws_bytes_median": 9888.5
       }
     }
   ]
