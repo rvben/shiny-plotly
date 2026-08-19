@@ -1,11 +1,11 @@
-// The browser half of shiny-plotly: an output binding that draws render_plotly values, and
-// a size tracker shared with fig_to_ui fragments.
+// The browser half of shiny-plotly: an output binding that draws render_plotly values and
+// forwards plotly events to Shiny inputs, and a size tracker shared with fig_to_ui fragments.
 //
 // The binding keeps one plotly graph div per output. The first figure is drawn with
 // Plotly.newPlot; every later one with Plotly.react, which diffs the figure into the graph
 // that is already there instead of tearing it down. So the DOM node, its event handlers
-// (post_script runs once) and plotly's per-graph state survive a re-render, and a figure
-// that sets layout.uirevision keeps the zoom and pan the user dragged.
+// (post_script and the events option attach once) and plotly's per-graph state survive a
+// re-render, and a figure that sets layout.uirevision keeps the zoom and pan the user dragged.
 //
 // Plotly re-measures a responsive graph only on window resize, and it registers one window
 // listener per graph div. So a graph whose card changes size without a window resize (a
@@ -17,6 +17,7 @@
   "use strict";
 
   var FILL_BASIS = "400px"; // height of a filling plot when nothing constrains it
+  var HOVER_DELAY_MS = 100; // quiet time before a hover (or the pointer leaving) is sent
   var observer = null;
 
   function differs(actual, laidOut) {
@@ -51,7 +52,77 @@
 
   function release(gd) {
     if (observer !== null) observer.unobserve(gd);
+    if (gd._shinyPlotlyHover) clearTimeout(gd._shinyPlotlyHover.timer);
     if (window.Plotly && gd._fullLayout) window.Plotly.purge(gd);
+  }
+
+  // --- events to inputs ---------------------------------------------------------------
+  // What plotly hands an event handler holds the full trace and axis objects, circular and
+  // large; what travels is each point's scalar fields plus the few objects worth having
+  // (bbox, pointNumbers, customdata), the same cut Dash makes. Typed arrays, which is how
+  // plotly holds decoded bdata, become plain arrays so they serialize as lists.
+
+  function plain(value) {
+    if (ArrayBuffer.isView(value)) return Array.prototype.slice.call(value);
+    if (Array.isArray(value)) return value.map(plain);
+    return value;
+  }
+
+  function pointData(gd, point) {
+    var out = {};
+    for (var key in point) {
+      var v = point[key];
+      if (v === null || typeof v !== "object") out[key] = v;
+    }
+    if (point.bbox) out.bbox = point.bbox;
+    if (point.pointNumbers) out.pointNumbers = point.pointNumbers;
+    var trace = gd._fullData && gd._fullData[point.curveNumber];
+    if (trace && trace.customdata != null && point.pointNumber !== undefined) {
+      out.customdata = plain(trace.customdata[point.pointNumber]);
+    }
+    return out;
+  }
+
+  function pointsData(gd, ev) {
+    if (!ev || !ev.points) return null; // a selection cleared by clicking empty space
+    var out = { points: ev.points.map(function (p) { return pointData(gd, p); }) };
+    if (ev.range) out.range = ev.range;
+    if (ev.lassoPoints) out.lassoPoints = ev.lassoPoints;
+    return out;
+  }
+
+  function relayoutData(ev) {
+    var out = {};
+    for (var key in ev) out[key] = plain(ev[key]);
+    return out;
+  }
+
+  // Wires the requested plotly events of one graph div to inputs named <output id>_<event>.
+  // Called once per graph div, right after its first draw; Plotly.react keeps the handlers.
+  function attachEvents(gd, outputId, names) {
+    var hover = { timer: null };
+    gd._shinyPlotlyHover = hover;
+    function send(name, value, options) {
+      window.Shiny.setInputValue(outputId + "_" + name, value, options);
+    }
+    function hoverLater(value) {
+      clearTimeout(hover.timer);
+      hover.timer = setTimeout(function () { send("hover", value); }, HOVER_DELAY_MS);
+    }
+    names.forEach(function (name) {
+      if (name === "click") {
+        // Every click counts, a repeated one too; the same rule as Shiny's plot clicks.
+        gd.on("plotly_click", function (ev) { send("click", pointsData(gd, ev), { priority: "event" }); });
+      } else if (name === "hover") {
+        gd.on("plotly_hover", function (ev) { hoverLater(pointsData(gd, ev)); });
+        gd.on("plotly_unhover", function () { hoverLater(null); });
+      } else if (name === "selected") {
+        gd.on("plotly_selected", function (ev) { send("selected", pointsData(gd, ev)); });
+        gd.on("plotly_deselect", function () { send("selected", null); });
+      } else if (name === "relayout") {
+        gd.on("plotly_relayout", function (ev) { send("relayout", relayoutData(ev)); });
+      }
+    });
   }
 
   // --- the output binding -------------------------------------------------------------
@@ -107,6 +178,7 @@
     gd = create(el, value);
     return window.Plotly.newPlot(gd, figure).then(function () {
       track(gd);
+      if (value.events && value.events.length) attachEvents(gd, el.id, value.events);
       runPostScript(gd, value.post_script);
     });
   }

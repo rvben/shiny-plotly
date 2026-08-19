@@ -149,12 +149,19 @@ _enable_lock = threading.Lock()
 
 def enable_compressed_plotly_js(app: object) -> bool:
     """
-    Put the compressed, immutable bundle route in front of Shiny's mount for ``app``.
+    Serve plotly.min.js compressed and immutable from ``app``, starting now.
 
-    ``app`` is the ``shiny.App`` a session belongs to (``session.app``); anything else is
-    ignored. Returns True when the route was added, False when it was already there,
-    ``app`` is not a Shiny app, or ``SHINY_PLOTLY_NO_COMPRESS`` is set in the environment
-    (the escape hatch for deployments that want Shiny's own static serving untouched).
+    Every :class:`~shiny_plotly.render_plotly` does this for its app when its first
+    session starts, which is too late for the page load that started that session. A Core
+    app can call it as soon as the ``shiny.App`` exists, so the first visitor of the
+    process gets the compressed bundle too::
+
+        app = App(app_ui, server)
+        enable_compressed_plotly_js(app)
+
+    Returns True when the route was added, False when it was already there, ``app`` is
+    not a Shiny app, or ``SHINY_PLOTLY_NO_COMPRESS`` is set in the environment (the escape
+    hatch for deployments that want Shiny's own static serving untouched).
     """
     if os.environ.get("SHINY_PLOTLY_NO_COMPRESS"):
         return False

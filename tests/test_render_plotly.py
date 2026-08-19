@@ -69,6 +69,30 @@ def test_output_plotly_carries_the_bundle_and_the_helper_so_no_page_level_call_i
     ]
 
 
+def test_events_reach_the_value_once_each_in_a_fixed_order():
+    @render_plotly(events=("relayout", "click", "click"))
+    def sales():
+        return bar()
+
+    assert sales.events == ("click", "relayout")
+
+
+def test_a_single_event_name_is_accepted_as_a_string():
+    @render_plotly(events="hover")
+    def sales():
+        return bar()
+
+    assert sales.events == ("hover",)
+
+
+def test_unknown_event_names_fail_at_decoration_time():
+    with pytest.raises(ValueError, match=r"plotly_clack.*click, hover, selected, relayout"):
+
+        @render_plotly(events=("click", "plotly_clack"))
+        def sales():
+            return bar()
+
+
 def test_output_plotly_is_namespaced_inside_a_module():
     @module.ui
     def mod_ui():
@@ -129,6 +153,7 @@ def make_app() -> App:
             width="300px",
             config={"displaylogo": False},
             post_script="console.log('{plot_id}')",
+            events=["selected", "click"],
         )
         def parity_fig():
             return bar()
@@ -174,6 +199,7 @@ def test_sync_figure_is_sent_as_figure_json_for_the_browser_helper_to_draw(value
     assert value["height"] is None
     assert value["width"] == "100%"
     assert value["post_script"] is None
+    assert value["events"] == []
 
 
 def test_figure_json_is_plotly_serialised_not_shiny_serialised():
@@ -213,6 +239,7 @@ def test_renderer_options_reach_the_value(values):
     assert value["width"] == "300px"
     assert value["config"] == {"responsive": True, "displaylogo": False}
     assert value["post_script"] == "console.log('{plot_id}')"
+    assert value["events"] == ["click", "selected"]
 
 
 def flush_one(client: TestClient, output_id: str) -> dict:

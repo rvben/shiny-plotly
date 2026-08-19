@@ -9,7 +9,13 @@ import pytest
 from shiny import App, Inputs, Outputs, Session, render, ui
 from starlette.testclient import TestClient
 
-from shiny_plotly import _serve, fig_to_ui, output_plotly, render_plotly
+from shiny_plotly import (
+    _serve,
+    enable_compressed_plotly_js,
+    fig_to_ui,
+    output_plotly,
+    render_plotly,
+)
 
 BUNDLE_URL = f"/lib/plotly-{plotly.__version__}/plotly.min.js"
 RAW = (pathlib.Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_bytes()
@@ -124,6 +130,20 @@ def test_fig_to_ui_inside_render_ui_enables_it_too():
         start_session(client)
         resp = client.get(BUNDLE_URL, headers={"Accept-Encoding": "identity"})
 
+    assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_a_core_app_can_enable_it_before_its_first_session():
+    """Explicitly enabled, even the first visitor of the process gets the compressed bundle."""
+    app = make_app()
+
+    assert enable_compressed_plotly_js(app) is True
+    assert enable_compressed_plotly_js(app) is False, "already there; nothing added twice"
+    assert _serve.bundle().wait(timeout=30)
+    with TestClient(app) as client:
+        resp = client.get(BUNDLE_URL, headers={"Accept-Encoding": "gzip"})
+
+    assert resp.headers["content-encoding"] == "gzip"
     assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 

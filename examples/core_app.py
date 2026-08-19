@@ -9,15 +9,7 @@ from itertools import accumulate
 import plotly.graph_objects as go
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
 
-from shiny_plotly import output_plotly, render_plotly
-
-# Forwards plotly click events to a Shiny input. {plot_id} is the graph div's id.
-CLICK_TO_INPUT = """
-document.getElementById('{plot_id}').on('plotly_click', function (ev) {
-    var p = ev.points[0];
-    Shiny.setInputValue('clicked', {x: p.x, y: p.y}, {priority: 'event'});
-});
-"""
+from shiny_plotly import enable_compressed_plotly_js, output_plotly, render_plotly
 
 app_ui = ui.page_sidebar(
     ui.sidebar(
@@ -68,17 +60,21 @@ def server(input: Inputs, output: Outputs, session: Session):
         x, y = data()
         return go.Figure(go.Scatter(x=x, y=[abs(v) for v in y], fill="tozeroy"))
 
-    @render_plotly(height="260px", post_script=CLICK_TO_INPUT, config={"displaylogo": False})
+    # Clicks arrive as input.fixed_plot_click (the output id plus the event name).
+    @render_plotly(height="260px", events="click", config={"displaylogo": False})
     def fixed_plot():
         x, y = data()
         return go.Figure(go.Scatter(x=x, y=y, mode="markers"))
 
     @render.text
     def click_info():
-        if not input.clicked.is_set():
+        if not input.fixed_plot_click.is_set():
             return "Click a point in the bottom chart."
-        pt = input.clicked()
+        pt = input.fixed_plot_click()["points"][0]
         return f"Clicked x={pt['x']}, y={pt['y']:.2f}"
 
 
 app = App(app_ui, server)
+# Optional: serve plotly.js compressed from the very first request instead of from the
+# first session on (see README, "plotly.js on the wire").
+enable_compressed_plotly_js(app)

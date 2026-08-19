@@ -126,7 +126,8 @@ The decorator creates its own output placeholder in Express, just like `@render_
     width="100%",
     figurewidget_margins=True,  # the l16/t32/r16/b16 margins shinywidgets applies
     config={"displaylogo": False},
-    post_script=CLICK_TO_INPUT,  # JavaScript run once, when the graph is first drawn
+    events=("click", "selected"),  # arrive as input.sales_click, input.sales_selected
+    post_script=MORE_JS,  # JavaScript run once, when the graph is first drawn
 )
 def sales(): ...
 ```
@@ -135,7 +136,7 @@ def sales(): ...
 
 ### Re-renders, zoom and pan
 
-Each `output_plotly` holds one plotly graph div. The first figure is drawn with `Plotly.newPlot`; every later one goes through `Plotly.react`, which diffs the new figure into the graph that is already there. So the DOM node, the handlers `post_script` attached and plotly's per-graph state all survive a re-render.
+Each `output_plotly` holds one plotly graph div. The first figure is drawn with `Plotly.newPlot`; every later one goes through `Plotly.react`, which diffs the new figure into the graph that is already there. So the DOM node, the event handlers (from `events=` or `post_script`) and plotly's per-graph state all survive a re-render.
 
 Whether the user's zoom and pan survive is plotly's `uirevision` rule, the same one shinywidgets users rely on for in-place updates: set `layout.uirevision` to any value and keep it the same across renders to preserve the view, change it to reset the view, leave it unset to reset on every render.
 
@@ -172,30 +173,46 @@ Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a s
 
 ### Events back to Shiny
 
-`post_script` runs once, after the first figure is drawn; `{plot_id}` is replaced with the graph div's id. Re-renders go through `Plotly.react` into the same graph div, so the handlers stay attached and are never stacked.
+`events=` names the plotly events to forward; each arrives as `input.<id>_<event>`, namespaced like the output inside a module. Four are available: `click`, `hover`, `selected` and `relayout`.
 
 ```python
-CLICK_TO_INPUT = """
-document.getElementById('{plot_id}').on('plotly_click', function (ev) {
-    var p = ev.points[0];
-    Shiny.setInputValue('clicked', {x: p.x, y: p.y}, {priority: 'event'});
-});
-"""
-
-
-@render_plotly(post_script=CLICK_TO_INPUT)
+@render_plotly(events=("click", "selected"))
 def scatter(): ...
 
 
 @render.text
 def click_info():
-    if not input.clicked.is_set():
+    if not input.scatter_click.is_set():
         return "Click a point."
-    pt = input.clicked()
-    return f"x={pt['x']}, y={pt['y']}"
+    pt = input.scatter_click()["points"][0]
+    return f"trace {pt['curveNumber']}, point {pt['pointNumber']}: x={pt['x']}, y={pt['y']}"
 ```
 
-`input.clicked()` raises a silent exception while the input has never been set, so check `is_set()` first when the output should show something before the first click.
+What arrives is plotly's own event data, cut to what serializes, the same way Dash cuts it:
+
+| event | value of `input.<id>_<event>()` |
+| --- | --- |
+| `click` | `{"points": [...]}`; fires on every click, a repeated one too |
+| `hover` | `{"points": [...]}` while over a point, `None` once the pointer leaves; debounced (100 ms) |
+| `selected` | `{"points": [...], "range": {"x": [..], "y": [..]}}` for a box, `lassoPoints` for a lasso; `None` after a double-click deselect |
+| `relayout` | plotly's relayout data as is: `{"xaxis.range[0]": ..., "xaxis.range[1]": ...}` after a zoom or pan, `{"xaxis.autorange": True, ...}` after a reset, `{"dragmode": "pan"}` from the mode bar, `{"autosize": True}` after a resize |
+
+Each point carries plotly's scalar fields for that trace type (`curveNumber`, `pointNumber`, `pointIndex`, `x`, `y`, `z`, `text`, `label`, `value`, `lat`, `lon`, ...) plus `customdata` (as a plain list, also when it was a numpy array), `bbox` and `pointNumbers` when present. `input.<id>_<event>()` raises a silent exception until the event has fired once, so check `is_set()` when the output should show something before that.
+
+For anything else, `post_script` runs once, after the first figure is drawn, with `{plot_id}` replaced by the graph div's id. Re-renders go through `Plotly.react` into the same graph div, so handlers attached either way stay attached and are never stacked.
+
+```python
+LEGEND_TO_INPUT = """
+document.getElementById('{plot_id}').on('plotly_legendclick', function (ev) {
+    Shiny.setInputValue('legend', ev.curveNumber, {priority: 'event'});
+    return true;  // let plotly toggle the trace as usual
+});
+"""
+
+
+@render_plotly(post_script=LEGEND_TO_INPUT)
+def scatter(): ...
+```
 
 ### Lower level
 
@@ -203,6 +220,7 @@ def click_info():
 - `plotly_js()` is the `HTMLDependency` for plotly.js, served from the installed `plotly` wheel at `/lib/plotly-<version>/plotly.min.js`. Every `output_plotly` and every `fig_to_ui` fragment carries it, so it is optional; add it to the page UI when the first figure is inserted later (`ui.insert_ui`, a `@render.ui` that starts empty) and the bundle should load with the page.
 - `shiny_plotly_js()` is the helper's dependency. Every output and fragment carries it too.
 - `FIGUREWIDGET_MARGINS` is the `{"l": 16, "t": 32, "r": 16, "b": 16}` mapping.
+- `enable_compressed_plotly_js(app)` turns on compressed, immutable serving of plotly.js for a `shiny.App` before its first session (see below).
 
 `render_plotly` needs `output_plotly`; it is an output binding, not a `render.ui`, so `ui.output_ui(id)` does not draw it.
 
@@ -214,7 +232,16 @@ Shiny serves HTML dependencies from a plain static mount: no compression, no `Ca
 uv add "shiny-plotly[brotli]"  # optional: brotli instead of gzip
 ```
 
-Two things to know. The page load that starts the very first session of a process has already asked for the bundle before the route exists, so that one visitor gets the raw file from Shiny's mount; everyone after gets the compressed one. And if a reverse proxy in front of the app does its own compression and caching, or you want Shiny's static serving untouched for any reason, set `SHINY_PLOTLY_NO_COMPRESS=1` in the app's environment.
+Two things to know. The page load that starts the very first session of a process has already asked for the bundle before the route exists, so that one visitor gets the raw file from Shiny's mount; everyone after gets the compressed one. A Core app can close that gap by enabling the route as soon as the `App` exists:
+
+```python
+from shiny_plotly import enable_compressed_plotly_js
+
+app = App(app_ui, server)
+enable_compressed_plotly_js(app)
+```
+
+And if a reverse proxy in front of the app does its own compression and caching, or you want Shiny's static serving untouched for any reason, set `SHINY_PLOTLY_NO_COMPRESS=1` in the app's environment; `enable_compressed_plotly_js` then returns `False` and adds nothing.
 
 ## Examples
 
@@ -232,7 +259,7 @@ make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check
 make bench       # the shinywidgets comparison above, on this machine
 ```
 
-`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested.
+`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested.
 
 ## License
 

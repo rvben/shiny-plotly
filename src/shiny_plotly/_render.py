@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import plotly.io as pio
@@ -12,7 +12,24 @@ from ._deps import plotly_js, shiny_plotly_js
 from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, fill_in_margins
 from ._serve import enable_compressed_plotly_js
 
-__all__ = ("output_plotly", "render_plotly")
+__all__ = ("EVENTS", "output_plotly", "render_plotly")
+
+# Plotly events that can be forwarded to Shiny inputs, in the order they are sent.
+EVENTS = ("click", "hover", "selected", "relayout")
+
+
+def normalize_events(events: str | Iterable[str] | None) -> tuple[str, ...]:
+    """The requested event names, validated, without duplicates, in :data:`EVENTS` order."""
+    if events is None:
+        return ()
+    names = (events,) if isinstance(events, str) else tuple(events)
+    unknown = [name for name in names if name not in EVENTS]
+    if unknown:
+        raise ValueError(
+            f"unknown plotly event(s) {', '.join(map(repr, unknown))}; "
+            f"events must be among {', '.join(EVENTS)}"
+        )
+    return tuple(name for name in EVENTS if name in names)
 
 
 def output_plotly(id: str, *, width: str | None = None, height: str | None = None) -> Tag:
@@ -55,6 +72,16 @@ class render_plotly(Renderer[Figure]):
     div. Returning ``None`` empties the output. Works in Core and Express; the decorated
     function may be sync or async.
 
+    Plotly events reach the server as inputs named after the output::
+
+        @render_plotly(events=("click", "selected"))
+        def sales(): ...
+
+        @render.text
+        def picked():
+            event = input.sales_click()  # {"points": [{"curveNumber": 0, "x": ..., ...}]}
+            ...
+
     Parameters
     ----------
     height, width
@@ -67,8 +94,21 @@ class render_plotly(Renderer[Figure]):
         Extra plotly config, merged over ``{"responsive": True}``.
     post_script
         JavaScript run once the graph div exists and the first figure is drawn, with
-        ``{plot_id}`` replaced by the graph div's id. The place to forward plotly events to
-        Shiny inputs; the handlers stay attached across re-renders.
+        ``{plot_id}`` replaced by the graph div's id. For anything the ``events`` option
+        does not cover; handlers attached here stay attached across re-renders.
+    events
+        Plotly events to forward to Shiny inputs: any of ``"click"``, ``"hover"``,
+        ``"selected"`` and ``"relayout"`` (one name or an iterable of names). Each arrives
+        as ``input.<id>_<event>``, namespaced like the output inside a module.
+        ``click``, ``hover`` and ``selected`` carry ``{"points": [...]}`` where each point
+        holds plotly's scalar fields (``curveNumber``, ``pointNumber``, ``pointIndex``,
+        ``x``, ``y``, ``z``, ``text``, ``label``, ``value``, ...) plus ``customdata``,
+        ``bbox`` and ``pointNumbers`` when present; a box or lasso selection adds ``range``
+        or ``lassoPoints``. ``relayout`` carries plotly's relayout data as is (zoom and pan
+        ranges, ``autorange``, ``dragmode``; a resize reports ``{"autosize": true}``).
+        A click fires on every click, repeated or not; hover is debounced and becomes
+        ``None`` once the pointer leaves the graph; a double-click deselect sets
+        ``selected`` to ``None``.
     """
 
     def __init__(
@@ -80,12 +120,14 @@ class render_plotly(Renderer[Figure]):
         figurewidget_margins: bool = False,
         config: Mapping[str, Any] | None = None,
         post_script: str | None = None,
+        events: str | Iterable[str] | None = None,
     ) -> None:
         self.height = height
         self.width = width
         self.figurewidget_margins = figurewidget_margins
         self.config = config
         self.post_script = post_script
+        self.events = normalize_events(events)
         # Registers _fn (sets output_id from its name) when used as a bare decorator.
         super().__init__(_fn)  # type: ignore[arg-type]
 
@@ -112,4 +154,5 @@ class render_plotly(Renderer[Figure]):
             "height": self.height,
             "width": self.width,
             "post_script": self.post_script,
+            "events": list(self.events),
         }

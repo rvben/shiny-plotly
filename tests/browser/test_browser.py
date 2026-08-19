@@ -12,15 +12,6 @@ SVG = "svg.main-svg"
 
 
 @pytest.fixture
-def errors(page: Page) -> Iterator[list[str]]:
-    """Console errors and uncaught exceptions raised while a test drives the page."""
-    seen: list[str] = []
-    page.on("pageerror", lambda err: seen.append(f"pageerror: {err}"))
-    page.on("console", lambda msg: seen.append(msg.text) if msg.type == "error" else None)
-    yield seen
-
-
-@pytest.fixture
 def app(page: Page, server_url: str, errors: list[str]) -> Iterator[Page]:
     page.goto(server_url + "/")
     expect(page.locator(f"#fig {SVG}").first).to_be_visible()

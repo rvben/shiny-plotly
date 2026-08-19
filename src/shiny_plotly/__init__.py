@@ -3,10 +3,12 @@
 from ._deps import __version__, plotly_js, shiny_plotly_js
 from ._html import FIGUREWIDGET_MARGINS, fig_to_ui
 from ._render import output_plotly, render_plotly
+from ._serve import enable_compressed_plotly_js
 
 __all__ = (
     "FIGUREWIDGET_MARGINS",
     "__version__",
+    "enable_compressed_plotly_js",
     "fig_to_ui",
     "output_plotly",
     "plotly_js",

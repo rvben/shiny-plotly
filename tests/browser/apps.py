@@ -1,7 +1,11 @@
 """Shiny apps exercised by the browser tests."""
 
+import json
+from typing import Any
+
+import numpy as np
 import plotly.graph_objects as go
-from shiny import App, Inputs, Outputs, Session, reactive, render, ui
+from shiny import App, Inputs, Outputs, Session, module, reactive, render, ui
 
 from shiny_plotly import output_plotly, plotly_js, render_plotly
 
@@ -76,5 +80,88 @@ def make_lazy_app() -> App:
         @render_plotly
         def lazy():
             return bars(2)
+
+    return App(app_ui, server)
+
+
+# --- events to inputs -------------------------------------------------------------------
+
+
+def as_text(value: Any) -> str:
+    """Sorted JSON, so a test can parse exactly what the server received."""
+    return json.dumps(value, sort_keys=True)
+
+
+@module.ui
+def events_mod_ui():
+    return ui.div(output_plotly("fig", height="200px", width="300px"), ui.output_text("out"))
+
+
+@module.server
+def events_mod_server(input: Inputs, output: Outputs, session: Session):
+    @render_plotly(events="click")
+    def fig():
+        return bars(3)
+
+    @render.text
+    def out():
+        return as_text(input.fig_click()["points"][0]["x"]) if input.fig_click.is_set() else "-"
+
+
+def make_events_app() -> App:
+    """Every event wired to an input, echoed as JSON; a module instance checks namespacing."""
+    app_ui = ui.page_fluid(
+        ui.input_slider("n", "Bars", min=2, max=8, value=3),
+        output_plotly("fig", height="300px", width="500px"),
+        output_plotly("sel", height="300px", width="500px"),
+        ui.output_text("click_out"),
+        ui.output_text("click_count"),
+        ui.output_text("hover_out"),
+        ui.output_text("relayout_out"),
+        ui.output_text("selected_out"),
+        events_mod_ui("m"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        clicks = reactive.value(0)
+
+        @render_plotly(events=("click", "hover", "relayout"))
+        def fig():
+            n = int(input.n())
+            # 2-D numpy customdata travels as bdata; the event must hand back plain lists.
+            fig = bars(n)
+            fig.data[0].customdata = np.arange(2 * n).reshape(n, 2)
+            return fig
+
+        @render_plotly(events=["selected"])
+        def sel():
+            return bars(4).update_layout(dragmode="select")
+
+        @reactive.effect
+        @reactive.event(input.fig_click)
+        def _count():
+            clicks.set(clicks() + 1)
+
+        @render.text
+        def click_out():
+            return as_text(input.fig_click()) if input.fig_click.is_set() else "-"
+
+        @render.text
+        def click_count():
+            return str(clicks())
+
+        @render.text
+        def hover_out():
+            return as_text(input.fig_hover()) if input.fig_hover.is_set() else "-"
+
+        @render.text
+        def relayout_out():
+            return as_text(input.fig_relayout()) if input.fig_relayout.is_set() else "-"
+
+        @render.text
+        def selected_out():
+            return as_text(input.sel_selected()) if input.sel_selected.is_set() else "-"
+
+        events_mod_server("m")
 
     return App(app_ui, server)
