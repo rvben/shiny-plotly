@@ -47,7 +47,7 @@ build:
 check-wheel: build
 	rm -rf .wheel-venv
 	uv venv --quiet .wheel-venv
-	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest pytest-asyncio httpx2
+	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2
 	.wheel-venv/bin/python -c "import shiny_plotly; print('shiny_plotly', shiny_plotly.__version__)"
 	cd tests && ../.wheel-venv/bin/python -m pytest -q -p no:cacheprovider --ignore=browser \
 		--rootdir=.. -c ../pyproject.toml .
@@ -63,7 +63,7 @@ check-floor:
 	rm -rf .floor-venv
 	uv venv --quiet .floor-venv
 	uv pip install --quiet --python .floor-venv/bin/python --resolution lowest-direct .
-	uv pip install --quiet --python .floor-venv/bin/python pytest pytest-asyncio httpx2 \
+	uv pip install --quiet --python .floor-venv/bin/python pytest httpx2 \
 		pytest-playwright numpy
 	.floor-venv/bin/python -c "import plotly, shiny, htmltools; \
 		print('plotly', plotly.__version__, 'shiny', shiny.__version__, 'htmltools', htmltools.__version__)"
