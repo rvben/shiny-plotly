@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Fixed
+
+- `output_plotly(id)` (and the Express auto output) did not namespace its id inside a Shiny module, so a `@render_plotly` in a module never found its output.
+
 ## [0.2.0](https://github.com/rvben/shiny-plotly/compare/v0.1.0...v0.2.0) - 2026-08-19
 
 ### Changed

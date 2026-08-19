@@ -5,6 +5,7 @@ from typing import Any
 
 import plotly.io as pio
 from htmltools import Tag, css, tags
+from shiny.module import resolve_id
 from shiny.render.renderer import Jsonifiable, Renderer, ValueFn
 
 from ._deps import plotly_js, shiny_plotly_js
@@ -32,7 +33,7 @@ def output_plotly(id: str, *, width: str | None = None, height: str | None = Non
     return tags.div(
         plotly_js(),
         shiny_plotly_js(),
-        id=id,
+        id=resolve_id(id),  # namespaced inside a module, like every Shiny output
         class_="shiny-plotly-output html-fill-container" + (" html-fill-item" if fill else ""),
         style=css(width=width, height=height),
     )

@@ -3,7 +3,7 @@ import json
 import plotly
 import plotly.graph_objects as go
 import pytest
-from shiny import App, Inputs, Outputs, Session, ui
+from shiny import App, Inputs, Outputs, Session, module, ui
 from shiny.render.renderer import Renderer
 from starlette.testclient import TestClient
 
@@ -67,6 +67,26 @@ def test_output_plotly_carries_the_bundle_and_the_helper_so_no_page_level_call_i
         ("plotly", plotly.__version__),
         ("shiny-plotly", __version__),
     ]
+
+
+def test_output_plotly_is_namespaced_inside_a_module():
+    @module.ui
+    def mod_ui():
+        return output_plotly("fig")
+
+    assert mod_ui("m").attrs["id"] == "m-fig"
+
+
+def test_express_auto_output_ui_is_namespaced_inside_a_module():
+    @render_plotly
+    def fig():
+        return bar()
+
+    @module.ui
+    def mod_ui():
+        return fig.auto_output_ui()
+
+    assert mod_ui("m").attrs["id"] == "m-fig"
 
 
 def test_output_plotly_with_a_height_is_a_fixed_size_fill_container():
