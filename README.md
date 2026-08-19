@@ -43,7 +43,7 @@ Measured on the same app (a slider and one fillable card with a line chart; `ben
 | Websocket bytes per re-render | 5.4 MB | 10 kB |
 | Re-render round trip, median of 50 | 1.1 to 1.4 s | 11 to 14 ms |
 
-Both need plotly.js in the browser. shiny-plotly serves `plotly.min.js` compressed (4.9 MB raw) with `Cache-Control: immutable`, so a browser fetches it once per plotly version; shinywidgets sends plotly's widget bundle as part of the `FigureWidget` state over the websocket, and a re-render creates a new `FigureWidget`, so that cost is paid on every visit and every re-render. The round-trip numbers come from a loaded laptop and are a range across runs, not a constant. shinywidgets does things this package does not (in-place `FigureWidget` updates, any ipywidget), which the table does not measure. `make bench` reproduces it; `bench/results.json` holds the raw numbers.
+Both need plotly.js in the browser. shiny-plotly serves `plotly.min.js` compressed (4.9 MB raw) with `Cache-Control: immutable`, so a browser fetches it once per plotly version; shinywidgets sends plotly's widget bundle as part of the `FigureWidget` state over the websocket, and a re-render creates a new `FigureWidget`, so that cost is paid on every visit and every re-render. The round-trip numbers come from a loaded laptop and are a range across runs, not a constant. shinywidgets does things this package does not (arbitrary in-place `FigureWidget` mutation, any ipywidget), which the table does not measure; the common in-place updates, appending points and changing trace or layout attributes, are covered by `extend_traces`, `restyle` and `relayout` below. `make bench` reproduces it; `bench/results.json` holds the raw numbers.
 
 ## Install
 
@@ -214,6 +214,39 @@ document.getElementById('{plot_id}').on('plotly_legendclick', function (ev) {
 def scatter(): ...
 ```
 
+### Live updates without a re-render
+
+A re-render sends the whole figure. For a stream of points, a colour change or a new title, send just the change: `extend_traces`, `restyle` and `relayout` call the plotly.js functions of the same names on the graph an output holds. All three are coroutines, so the effect that calls them is `async def`.
+
+```python
+from shiny_plotly import extend_traces, relayout, restyle
+
+
+@render_plotly
+def prices():
+    return go.Figure(go.Scatter(x=[], y=[], mode="lines"))  # the seed; the stream fills it
+
+
+@reactive.effect
+async def _stream():
+    reactive.invalidate_later(1)
+    t, v = latest_sample()
+    await extend_traces("prices", {"x": [[t]], "y": [[v]]}, max_points=500)
+
+
+@reactive.effect
+@reactive.event(input.highlight)
+async def _highlight():
+    await restyle("prices", {"line.color": "crimson"}, indices=0)
+    await relayout("prices", {"title.text": "highlighted"})
+```
+
+- `extend_traces(id, data, indices=None, *, max_points=None)`: `data` maps an array attribute to one sequence of new values per trace, in the order of `indices` (`{"x": [[t]], "y": [[v]]}` appends one point to one trace; `{"y": [[1], [2]]}` with `indices=[0, 1]` one point to each of two). `indices` (an int or a list) defaults to every trace; `max_points` drops the oldest points past that many, for a rolling window.
+- `restyle(id, update, indices=None)`: `update` maps attribute paths to values; `{"marker.color": "red"}` applies to every trace in `indices`, a list value applies per trace (`{"opacity": [0.5, 1]}` with `indices=[0, 1]`).
+- `relayout(id, update)`: layout attribute paths, `{"title.text": "Live"}`, `{"xaxis.range": [0, 10]}`, `{"xaxis.autorange": True}`. With `events="relayout"` on the output, the result comes back as `input.<id>_relayout`, the same as a user's zoom.
+
+The values go through plotly's encoder, so numpy arrays, pandas columns and datetimes work. The id is namespaced inside a module, like the output. An update reaches the figure that is drawn at that moment; one sent while the output has no figure (its first render is still running, it sits in a hidden tab, it shows an error or was emptied by `None`) is held and applied, in order, right after the output's next draw. A re-render replaces the figure, updates included, with what the render function returns: the server stays the source of truth, and a figure that should keep its streamed points across a re-render builds them in from server-side state.
+
 ### Lower level
 
 - `fig_to_ui(fig, div_id=None, *, height, width, figurewidget_margins, config, post_script)` returns a `TagList` holding the plotly.js dependency, the helper dependency and a `<div class="shiny-plotly">` that draws the figure with `Plotly.newPlot` (plotly's own `to_html` fragment). Use it from a plain `@render.ui` that composes a figure with other UI, or from any htmltools context. Each render draws a fresh graph; an output that is only a figure is better served by `render_plotly`.
@@ -221,6 +254,7 @@ def scatter(): ...
 - `shiny_plotly_js()` is the helper's dependency. Every output and fragment carries it too.
 - `FIGUREWIDGET_MARGINS` is the `{"l": 16, "t": 32, "r": 16, "b": 16}` mapping.
 - `enable_compressed_plotly_js(app)` turns on compressed, immutable serving of plotly.js for a `shiny.App` before its first session (see below).
+- `extend_traces`, `restyle` and `relayout` take an optional `session=` when called outside the current session's context.
 
 `render_plotly` needs `output_plotly`; it is an output binding, not a `render.ui`, so `ui.output_ui(id)` does not draw it.
 
@@ -259,7 +293,7 @@ make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check
 make bench       # the shinywidgets comparison above, on this machine
 ```
 
-`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
+`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `extend_traces`, `restyle` and `relayout` applied in place (rolling window, one trace or all, held until the first draw, reset by a re-render, inside a module, dropped with a warning for an unknown output), `post_script` click wiring (once, not stacked), error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
 
 ## License
 

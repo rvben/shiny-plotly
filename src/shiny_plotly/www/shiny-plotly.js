@@ -1,5 +1,6 @@
 // The browser half of shiny-plotly: an output binding that draws render_plotly values and
-// forwards plotly events to Shiny inputs, and a size tracker shared with fig_to_ui fragments.
+// forwards plotly events to Shiny inputs, a handler that applies the in-place updates sent
+// by extend_traces, restyle and relayout, and a size tracker shared with fig_to_ui fragments.
 //
 // The binding keeps one plotly graph div per output. The first figure is drawn with
 // Plotly.newPlot; every later one with Plotly.react, which diffs the figure into the graph
@@ -180,7 +181,49 @@
       track(gd);
       if (value.events && value.events.length) attachEvents(gd, el.id, value.events);
       runPostScript(gd, value.post_script);
+      gd._shinyPlotlyDrawn = true;
+      return applyPending(el, gd);
     });
+  }
+
+  // --- in-place updates -----------------------------------------------------------------
+  // extend_traces, restyle and relayout send {id, method, args}: the output id, the name of
+  // the Plotly function, and its arguments after the graph div as plotly JSON. An update for
+  // an output that has no figure drawn right now (a slow first render, an output in a hidden
+  // tab, an output showing an error or emptied by a None) is held on the output element and
+  // applied, in order, right after its next draw. One for an id with no output on the page
+  // is dropped with a warning.
+
+  function applyUpdate(gd, update) {
+    var args = JSON.parse(update.args);
+    if (update.method === "extendTraces") {
+      // Plotly.extendTraces wants an array of indices and no maxPoints rather than null.
+      if (args[1] === null) args[1] = gd.data.map(function (_, i) { return i; });
+      if (args[2] === null) args.length = 2;
+    }
+    return window.Plotly[update.method].apply(window.Plotly, [gd].concat(args));
+  }
+
+  function applyPending(el, gd) {
+    var queue = el._shinyPlotlyPending || [];
+    el._shinyPlotlyPending = null;
+    return queue.reduce(function (chain, update) {
+      return chain.then(function () { return applyUpdate(gd, update); });
+    }, Promise.resolve());
+  }
+
+  function onUpdate(update) {
+    var el = document.getElementById(update.id);
+    if (!el) {
+      console.warn("shiny-plotly: " + update.method + " for '" + update.id + "' dropped: no such output on the page");
+      return;
+    }
+    var gd = graphDiv(el);
+    if (gd && gd._shinyPlotlyDrawn) {
+      applyUpdate(gd, update);
+      return;
+    }
+    (el._shinyPlotlyPending || (el._shinyPlotlyPending = [])).push(update);
   }
 
   function register() {
@@ -207,6 +250,7 @@
       el.textContent = err.message;
     };
     window.Shiny.outputBindings.register(binding, "shiny-plotly.output");
+    window.Shiny.addCustomMessageHandler("shiny-plotly", onUpdate);
     return true;
   }
 

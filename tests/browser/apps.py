@@ -1,5 +1,6 @@
 """Shiny apps exercised by the browser tests."""
 
+import asyncio
 import json
 from typing import Any
 
@@ -7,7 +8,14 @@ import numpy as np
 import plotly.graph_objects as go
 from shiny import App, Inputs, Outputs, Session, module, reactive, render, ui
 
-from shiny_plotly import output_plotly, plotly_js, render_plotly
+from shiny_plotly import (
+    extend_traces,
+    output_plotly,
+    plotly_js,
+    relayout,
+    render_plotly,
+    restyle,
+)
 
 CLICK_TO_INPUT = """
 document.getElementById('{plot_id}').on('plotly_click', function (ev) {
@@ -163,5 +171,82 @@ def make_events_app() -> App:
             return as_text(input.sel_selected()) if input.sel_selected.is_set() else "-"
 
         events_mod_server("m")
+
+    return App(app_ui, server)
+
+
+# --- in-place updates -------------------------------------------------------------------
+
+
+@module.ui
+def live_mod_ui():
+    return ui.div(
+        output_plotly("fig", height="200px", width="300px"),
+        ui.input_action_button("recolor", "recolor"),
+    )
+
+
+@module.server
+def live_mod_server(input: Inputs, output: Outputs, session: Session):
+    @render_plotly
+    def fig():
+        return bars(2)
+
+    @reactive.effect
+    @reactive.event(input.recolor)
+    async def _recolor():
+        await restyle("fig", {"marker.color": "rgb(255, 0, 0)"})
+
+
+def make_live_app() -> App:
+    """Buttons that update drawn figures in place; one update is sent before its figure."""
+    app_ui = ui.page_fluid(
+        ui.input_action_button("tick", "tick"),
+        ui.input_action_button("recolor", "recolor"),
+        ui.input_action_button("retitle", "retitle"),
+        ui.input_action_button("redraw", "redraw"),
+        ui.input_action_button("nowhere", "nowhere"),
+        output_plotly("live", height="300px", width="500px"),
+        output_plotly("late", height="200px", width="300px"),
+        live_mod_ui("m"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def live():
+            input.redraw()  # a re-render starts over from this figure
+            return go.Figure([go.Scatter(y=[1, 2, 3]), go.Scatter(y=[3, 2, 1])])
+
+        @reactive.effect
+        @reactive.event(input.tick)
+        async def _tick():
+            await extend_traces("live", {"y": [[input.tick() + 3]]}, indices=0, max_points=4)
+
+        @reactive.effect
+        @reactive.event(input.recolor)
+        async def _recolor():
+            await restyle("live", {"marker.color": "rgb(255, 0, 0)"}, indices=1)
+
+        @reactive.effect
+        @reactive.event(input.retitle)
+        async def _retitle():
+            await relayout("live", {"title.text": f"title {input.retitle()}"})
+
+        @reactive.effect
+        @reactive.event(input.nowhere)
+        async def _nowhere():
+            await relayout("absent", {"title.text": "dropped"})
+
+        @render_plotly
+        async def late():
+            await asyncio.sleep(0.8)  # the updates below are sent before this figure exists
+            return go.Figure(go.Scatter(y=[1]))
+
+        @reactive.effect
+        async def _before_the_first_draw():
+            await extend_traces("late", {"y": [[9]]})
+            await relayout("late", {"title.text": "queued"})
+
+        live_mod_server("m")
 
     return App(app_ui, server)

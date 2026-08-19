@@ -1,4 +1,4 @@
-"""Shiny Core example: three plotly charts rendered without shinywidgets.
+"""Shiny Core example: four plotly charts rendered without shinywidgets, one of them live.
 
 Run with:  uv run --with shiny-plotly shiny run examples/core_app.py
 """
@@ -9,7 +9,7 @@ from itertools import accumulate
 import plotly.graph_objects as go
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
 
-from shiny_plotly import enable_compressed_plotly_js, output_plotly, render_plotly
+from shiny_plotly import enable_compressed_plotly_js, extend_traces, output_plotly, render_plotly
 
 app_ui = ui.page_sidebar(
     ui.sidebar(
@@ -29,9 +29,15 @@ app_ui = ui.page_sidebar(
             full_screen=True,
         ),
     ),
-    ui.card(
-        ui.card_header("Fixed height, click a point"),
-        output_plotly("fixed_plot"),
+    ui.layout_columns(
+        ui.card(
+            ui.card_header("Fixed height, click a point"),
+            output_plotly("fixed_plot"),
+        ),
+        ui.card(
+            ui.card_header("Live: a point a second, no re-render"),
+            output_plotly("live_plot"),
+        ),
     ),
     title="shiny-plotly",
     fillable=True,
@@ -65,6 +71,24 @@ def server(input: Inputs, output: Outputs, session: Session):
     def fixed_plot():
         x, y = data()
         return go.Figure(go.Scatter(x=x, y=y, mode="markers"))
+
+    # The render function draws the seed once; every second an effect appends one point
+    # to the graph in the browser, keeping the last 60, and nothing is re-rendered.
+    @render_plotly(height="260px")
+    def live_plot():
+        return go.Figure(go.Scatter(x=[], y=[], mode="lines")).update_layout(
+            xaxis_title="tick", yaxis_title="value"
+        )
+
+    tick = 0
+
+    @reactive.effect
+    async def _stream():
+        nonlocal tick
+        reactive.invalidate_later(1)
+        tick += 1
+        point = {"x": [[tick]], "y": [[random.gauss(0, 1)]]}
+        await extend_traces("live_plot", point, max_points=60)
 
     @render.text
     def click_info():

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `@render_plotly(events=...)` forwards plotly events to Shiny inputs: any of `click`, `hover`, `selected` and `relayout` arrive as `input.<id>_<event>` (namespaced inside a module), carrying plotly's event data cut to what serializes (`points` with each point's scalar fields plus `customdata`, `bbox`, `pointNumbers`; `range` or `lassoPoints` for selections; relayout data as is). A click fires on every click; hover is debounced and becomes `None` when the pointer leaves; a deselect sets `selected` to `None`. Handlers attach once per graph div and survive re-renders.
+- `extend_traces(id, data, indices=None, *, max_points=None)`, `restyle(id, update, indices=None)` and `relayout(id, update)`: in-place updates to the figure an output holds, sent as Shiny custom messages and applied in the browser with `Plotly.extendTraces`, `Plotly.restyle` and `Plotly.relayout`. Values go through plotly's encoder; the id is namespaced inside a module; an update sent while the output has no figure drawn is held and applied after its next draw; a re-render replaces the figure, updates included.
 - `enable_compressed_plotly_js(app)` is public: a Core app can serve plotly.js compressed and immutable from its very first request instead of from its first session on.
 
 ### Fixed
