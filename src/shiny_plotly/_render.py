@@ -7,6 +7,7 @@ import plotly.io as pio
 from htmltools import Tag, css, tags
 from shiny.module import resolve_id
 from shiny.render.renderer import Jsonifiable, Renderer, ValueFn
+from shiny.ui.fill import as_fill_item, as_fillable_container
 
 from ._deps import plotly_js, shiny_plotly_js
 from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, fill_in_margins
@@ -46,14 +47,17 @@ def output_plotly(id: str, *, width: str | None = None, height: str | None = Non
     grows and shrinks with its container. Passing ``height`` fixes the output's height
     instead (the plot fills that height), the same rule ``output_widget`` follows.
     """
-    fill = height is None
-    return tags.div(
+    tag = tags.div(
         plotly_js(),
         shiny_plotly_js(),
         id=resolve_id(id),  # namespaced inside a module, like every Shiny output
-        class_="shiny-plotly-output html-fill-container" + (" html-fill-item" if fill else ""),
+        class_="shiny-plotly-output",
         style=css(width=width, height=height),
     )
+    # The graph inside fills the output, so the output is a fillable container on every
+    # page; these helpers bring the fill CSS, which a plain page does not carry by itself.
+    tag = as_fillable_container(tag)
+    return as_fill_item(tag) if height is None else tag
 
 
 class render_plotly(Renderer[Figure]):

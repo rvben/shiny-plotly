@@ -63,10 +63,18 @@ def test_output_plotly_is_a_fill_aware_output_bound_by_the_browser_helper():
 def test_output_plotly_carries_the_bundle_and_the_helper_so_no_page_level_call_is_needed():
     deps = output_plotly("sales").get_dependencies()
 
-    assert [(d.name, str(d.version)) for d in deps] == [
+    assert [(d.name, str(d.version)) for d in deps if d.name != "htmltools-fill"] == [
         ("plotly", plotly.__version__),
         ("shiny-plotly", __version__),
     ]
+
+
+@pytest.mark.parametrize("height", [None, "200px"])
+def test_output_plotly_carries_the_fill_css_so_the_graph_fills_the_output_on_any_page(height):
+    """Without it the graph inside a fixed-height output on a plain page keeps its 400px."""
+    deps = output_plotly("sales", height=height).get_dependencies()
+
+    assert "htmltools-fill" in [d.name for d in deps]
 
 
 def test_events_reach_the_value_once_each_in_a_fixed_order():

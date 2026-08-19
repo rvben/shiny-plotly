@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `output_plotly()` now carries the htmltools fill CSS itself. On a page that did not load it otherwise (`ui.page_fluid` without a card), a fixed-height output (`output_plotly(id, height="200px")`) with a bare `@render_plotly` drew a 400px graph that overflowed the output and whatever sat below it.
 - `output_plotly(id)` (and the Express auto output) did not namespace its id inside a Shiny module, so a `@render_plotly` in a module never found its output.
 - The declared dependency floor was wrong: `plotly>=5.0` and `htmltools>=0.5` could not work (`fig_to_ui` needs `to_html(div_id=...)`, which plotly 5.5 introduced; shiny 1.0 itself needs htmltools 0.5.2). The bounds are now `plotly>=5.5`, `htmltools>=0.5.2`, and CI installs exactly that floor (with shiny 1.0) and runs the whole suite against it, browser tests included (`make check-floor`).
 
