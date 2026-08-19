@@ -32,6 +32,18 @@ That is the whole API surface for the common case. The figure is serialized with
 
 `shiny-plotly` renders the figure the way plotly itself does, as HTML plus `Plotly.newPlot`, and uses Shiny's `render.ui` for delivery. The plotly.js bundle is served straight from the installed `plotly` wheel, keyed by its version, so nothing is copied or vendored.
 
+Measured on the same app (a slider and one fillable card with a line chart; `bench/`), shiny 1.7.0, plotly 6.9.0, shinywidgets 0.8.1, shiny-plotly 0.1.0, headless Chromium, 2026-08-19:
+
+| | shinywidgets | shiny-plotly |
+| --- | --- | --- |
+| Packages added on top of `shiny` + `plotly` | 24 (38 MB) | 1 (24 kB) |
+| First visit, bytes to the first figure | 10.7 MB (5.3 MB HTTP + 5.4 MB websocket) | 6.2 MB (6.2 MB HTTP + 10 kB websocket) |
+| Repeat visit (warm browser cache) | 5.4 MB, nearly all websocket | 19 kB |
+| Websocket bytes per re-render | 5.4 MB | 11 kB |
+| Re-render round trip, median of 50 | 1.1 to 1.3 s | 13 to 14 ms |
+
+Both need plotly.js in the browser. shiny-plotly serves `plotly.min.js` as a static file the browser caches; shinywidgets sends plotly's widget bundle as part of the `FigureWidget` state over the websocket, and a re-render creates a new `FigureWidget`, so that cost is paid on every visit and every re-render. The round-trip numbers come from a loaded laptop and are a range across runs, not a constant. shinywidgets does things this package does not (in-place `FigureWidget` updates, any ipywidget), which the table does not measure. `make bench` reproduces it; `bench/results.json` holds the raw numbers.
+
 ## Install
 
 ```sh
@@ -192,6 +204,7 @@ uv run --with shiny-plotly shiny run examples/express_app.py
 make sync        # uv sync --all-groups
 make browsers    # playwright install chromium, once
 make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check
+make bench       # the shinywidgets comparison above, on this machine
 ```
 
 `make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, purge on re-render, full screen, `post_script` click wiring and on-demand loading of plotly.js. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested.

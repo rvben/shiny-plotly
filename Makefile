@@ -1,4 +1,4 @@
-.PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
+.PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel bench \
 	check version check-version release-notes publish clean release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -54,6 +54,12 @@ check-wheel: build
 	rm -rf .wheel-venv
 
 check: lock-check lint typecheck test test-browser check-wheel
+
+# Measures shinywidgets against this package on identical apps (bench/run.py) and
+# prints a Markdown table; raw numbers land in bench/results.json. Needs the bench
+# dependency group (make sync) and Chromium (make browsers).
+bench:
+	uv run python -m bench.run $(BENCH_ARGS)
 
 # The version in pyproject.toml, the single source for the package version.
 version:

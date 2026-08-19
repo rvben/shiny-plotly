@@ -1,0 +1,85 @@
+{
+  "environment": {
+    "date": "2026-08-19",
+    "python": "3.13.5",
+    "platform": "Darwin arm64",
+    "chromium": "151.0.7922.34",
+    "load_average_1m": 5.9150390625,
+    "versions": {
+      "shiny": "1.7.0",
+      "plotly": "6.9.0",
+      "shinywidgets": "0.8.1",
+      "anywidget": "0.11.0",
+      "ipywidgets": "8.1.9",
+      "shiny-plotly": "0.1.0"
+    }
+  },
+  "footprint": {
+    "base": {
+      "packages": 33,
+      "site_packages_bytes": 72864326
+    },
+    "shinywidgets": {
+      "packages": 57,
+      "site_packages_bytes": 110681838,
+      "import_s_median": 0.3563607078976929
+    },
+    "shiny-plotly": {
+      "packages": 34,
+      "site_packages_bytes": 72888592,
+      "import_s_median": 0.2525564171373844
+    }
+  },
+  "apps": [
+    {
+      "name": "shinywidgets",
+      "page_load": {
+        "http_bytes": 5279927,
+        "http_requests": 24,
+        "plotly_js_bytes": 0,
+        "ws_received": 5342191,
+        "ws_sent": 26186,
+        "time_to_first_plot_s": 1.588399125263095
+      },
+      "repeat_visit": {
+        "http_bytes": 9800,
+        "http_requests": 24,
+        "plotly_js_bytes": 0,
+        "ws_received": 5342191,
+        "ws_sent": 26186,
+        "time_to_first_plot_s": 1.3216208750382066
+      },
+      "rerender": {
+        "runs": 50,
+        "median_s": 1.1001854171045125,
+        "p90_s": 1.3045521794818342,
+        "ws_bytes_median": 5351481.0
+      }
+    },
+    {
+      "name": "shiny-plotly",
+      "page_load": {
+        "http_bytes": 6195799,
+        "http_requests": 20,
+        "plotly_js_bytes": 4853463,
+        "ws_received": 9746,
+        "ws_sent": 351,
+        "time_to_first_plot_s": 0.7224395000375807
+      },
+      "repeat_visit": {
+        "http_bytes": 8544,
+        "http_requests": 20,
+        "plotly_js_bytes": 505,
+        "ws_received": 9746,
+        "ws_sent": 351,
+        "time_to_first_plot_s": 0.6404417078010738
+      },
+      "rerender": {
+        "runs": 50,
+        "median_s": 0.01349079143255949,
+        "p90_s": 0.01601492934860289,
+        "ws_bytes_median": 10874.5
+      }
+    }
+  ]
+}
