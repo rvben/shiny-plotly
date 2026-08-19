@@ -84,9 +84,19 @@
     return out;
   }
 
-  function pointsData(gd, ev) {
+  // Above maxPoints (null: no cap) the points stay here and the value carries their count
+  // and the selection's geometry, so the server knows what was selected and can recompute
+  // membership from its own data; a 100-byte point times a dense trace would otherwise
+  // build a message of many megabytes, or one that closes the websocket.
+  function pointsData(gd, ev, maxPoints) {
     if (!ev || !ev.points) return null; // a selection cleared by clicking empty space
-    var out = { points: ev.points.map(function (p) { return pointData(gd, p); }) };
+    var out = {};
+    if (maxPoints !== null && maxPoints !== undefined && ev.points.length > maxPoints) {
+      out.points = null;
+      out.point_count = ev.points.length;
+    } else {
+      out.points = ev.points.map(function (p) { return pointData(gd, p); });
+    }
     if (ev.range) out.range = ev.range;
     if (ev.lassoPoints) out.lassoPoints = ev.lassoPoints;
     return out;
@@ -100,7 +110,7 @@
 
   // Wires the requested plotly events of one graph div to inputs named <output id>_<event>.
   // Called once per graph div, right after its first draw; Plotly.react keeps the handlers.
-  function attachEvents(gd, outputId, names) {
+  function attachEvents(gd, outputId, names, maxPoints) {
     var hover = { timer: null };
     gd._shinyPlotlyHover = hover;
     function send(name, value, options) {
@@ -110,15 +120,18 @@
       clearTimeout(hover.timer);
       hover.timer = setTimeout(function () { send("hover", value); }, HOVER_DELAY_MS);
     }
+    function points(ev) {
+      return pointsData(gd, ev, maxPoints);
+    }
     names.forEach(function (name) {
       if (name === "click") {
         // Every click counts, a repeated one too; the same rule as Shiny's plot clicks.
-        gd.on("plotly_click", function (ev) { send("click", pointsData(gd, ev), { priority: "event" }); });
+        gd.on("plotly_click", function (ev) { send("click", points(ev), { priority: "event" }); });
       } else if (name === "hover") {
-        gd.on("plotly_hover", function (ev) { hoverLater(pointsData(gd, ev)); });
+        gd.on("plotly_hover", function (ev) { hoverLater(points(ev)); });
         gd.on("plotly_unhover", function () { hoverLater(null); });
       } else if (name === "selected") {
-        gd.on("plotly_selected", function (ev) { send("selected", pointsData(gd, ev)); });
+        gd.on("plotly_selected", function (ev) { send("selected", points(ev)); });
         gd.on("plotly_deselect", function () { send("selected", null); });
       } else if (name === "relayout") {
         gd.on("plotly_relayout", function (ev) { send("relayout", relayoutData(ev)); });
@@ -179,7 +192,9 @@
     gd = create(el, value);
     return window.Plotly.newPlot(gd, figure).then(function () {
       track(gd);
-      if (value.events && value.events.length) attachEvents(gd, el.id, value.events);
+      if (value.events && value.events.length) {
+        attachEvents(gd, el.id, value.events, value.max_event_points);
+      }
       runPostScript(gd, value.post_script);
       gd._shinyPlotlyDrawn = true;
       return applyPending(el, gd);

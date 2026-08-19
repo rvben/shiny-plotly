@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench check version check-version release-notes publish clean release-patch release-minor release-major
+	check-floor bench bench-events check version check-version release-notes publish clean release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
 
@@ -79,6 +79,11 @@ check: lock-check lint typecheck test test-browser check-wheel check-floor
 # dependency group (make sync) and Chromium (make browsers).
 bench:
 	uv run python -m bench.run $(BENCH_ARGS)
+
+# Measures what a selected event costs on a dense trace, capped by max_event_points and
+# uncapped (bench/events.py); the numbers behind that option's default.
+bench-events:
+	uv run python -m bench.events $(BENCH_ARGS)
 
 # The version in pyproject.toml, the single source for the package version.
 version:

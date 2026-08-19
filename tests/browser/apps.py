@@ -122,11 +122,13 @@ def make_events_app() -> App:
         ui.input_slider("n", "Bars", min=2, max=8, value=3),
         output_plotly("fig", height="300px", width="500px"),
         output_plotly("sel", height="300px", width="500px"),
+        output_plotly("dense", height="300px", width="500px"),
         ui.output_text("click_out"),
         ui.output_text("click_count"),
         ui.output_text("hover_out"),
         ui.output_text("relayout_out"),
         ui.output_text("selected_out"),
+        ui.output_text("dense_out"),
         events_mod_ui("m"),
     )
 
@@ -144,6 +146,11 @@ def make_events_app() -> App:
         @render_plotly(events=["selected"])
         def sel():
             return bars(4).update_layout(dragmode="select")
+
+        @render_plotly(events="selected", max_event_points=3)
+        def dense():
+            fig = go.Figure(go.Scatter(x=list(range(8)), y=[1] * 8, mode="markers"))
+            return fig.update_layout(dragmode="select")
 
         @reactive.effect
         @reactive.event(input.fig_click)
@@ -169,6 +176,10 @@ def make_events_app() -> App:
         @render.text
         def selected_out():
             return as_text(input.sel_selected()) if input.sel_selected.is_set() else "-"
+
+        @render.text
+        def dense_out():
+            return as_text(input.dense_selected()) if input.dense_selected.is_set() else "-"
 
         events_mod_server("m")
 

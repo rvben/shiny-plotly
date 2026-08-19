@@ -13,10 +13,17 @@ from ._deps import plotly_js, shiny_plotly_js
 from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, fill_in_margins
 from ._serve import enable_compressed_plotly_js
 
-__all__ = ("EVENTS", "output_plotly", "render_plotly")
+__all__ = ("DEFAULT_MAX_EVENT_POINTS", "EVENTS", "output_plotly", "render_plotly")
 
 # Plotly events that can be forwarded to Shiny inputs, in the order they are sent.
 EVENTS = ("click", "hover", "selected", "relayout")
+
+# Points per event above which the browser sends the count and the selection's geometry
+# instead of the points. Each point is about 100 bytes of JSON; at this cap an event is
+# about 1 MB and reaches the server in well under a second, while a selection of every
+# point of a 200k-point trace would be 20 MB, above the 16 MB websocket message limit
+# of uvicorn's default settings, which closes the connection and the session with it.
+DEFAULT_MAX_EVENT_POINTS = 10_000
 
 
 def normalize_events(events: str | Iterable[str] | None) -> tuple[str, ...]:
@@ -31,6 +38,14 @@ def normalize_events(events: str | Iterable[str] | None) -> tuple[str, ...]:
             f"events must be among {', '.join(EVENTS)}"
         )
     return tuple(name for name in EVENTS if name in names)
+
+
+def normalize_max_event_points(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"max_event_points must be a positive int or None, got {value!r}")
+    return value
 
 
 def output_plotly(id: str, *, width: str | None = None, height: str | None = None) -> Tag:
@@ -113,6 +128,14 @@ class render_plotly(Renderer[Figure]):
         A click fires on every click, repeated or not; hover is debounced and becomes
         ``None`` once the pointer leaves the graph; a double-click deselect sets
         ``selected`` to ``None``.
+    max_event_points
+        The most points one event carries, 10 000 by default. An event with more points
+        (a box or lasso over a dense trace) arrives with ``"points": None`` and
+        ``"point_count"`` set, plus its ``range`` or ``lassoPoints`` as usual, so the
+        selection is known and membership can be recomputed on the server, where the
+        data is. At 10 000 points an event is about 1 MB; ``None`` lifts the cap, and a
+        selection of 150 000 points or more then exceeds the 16 MB websocket message
+        limit uvicorn applies by default, which closes the session.
     """
 
     def __init__(
@@ -125,6 +148,7 @@ class render_plotly(Renderer[Figure]):
         config: Mapping[str, Any] | None = None,
         post_script: str | None = None,
         events: str | Iterable[str] | None = None,
+        max_event_points: int | None = DEFAULT_MAX_EVENT_POINTS,
     ) -> None:
         self.height = height
         self.width = width
@@ -132,6 +156,7 @@ class render_plotly(Renderer[Figure]):
         self.config = config
         self.post_script = post_script
         self.events = normalize_events(events)
+        self.max_event_points = normalize_max_event_points(max_event_points)
         # Registers _fn (sets output_id from its name) when used as a bare decorator.
         super().__init__(_fn)  # type: ignore[arg-type]
 
@@ -159,4 +184,5 @@ class render_plotly(Renderer[Figure]):
             "width": self.width,
             "post_script": self.post_script,
             "events": list(self.events),
+            "max_event_points": self.max_event_points,
         }

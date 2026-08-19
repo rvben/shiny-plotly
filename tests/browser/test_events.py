@@ -89,12 +89,20 @@ def test_hover_reports_the_point_and_null_once_the_pointer_leaves(app: Page):
 
 
 def drag(page: Page, output_id: str, x0: float, y0: float, x1: float, y1: float) -> None:
-    box = page.locator(f"#{output_id} .nsewdrag").bounding_box()
+    drag_area = page.locator(f"#{output_id} .nsewdrag")
+    drag_area.scroll_into_view_if_needed()  # mouse coordinates are viewport coordinates
+    box = drag_area.bounding_box()
     assert box is not None
     page.mouse.move(box["x"] + box["width"] * x0, box["y"] + box["height"] * y0)
     page.mouse.down()
     page.mouse.move(box["x"] + box["width"] * x1, box["y"] + box["height"] * y1, steps=8)
     page.mouse.up()
+
+
+def deselect(page: Page, output_id: str) -> None:
+    box = page.locator(f"#{output_id} .nsewdrag").bounding_box()
+    assert box is not None
+    page.mouse.dblclick(box["x"] + box["width"] * 0.8, box["y"] + box["height"] * 0.5)
 
 
 def test_a_dragged_zoom_arrives_as_relayout_data(app: Page):
@@ -115,11 +123,33 @@ def test_a_box_selection_arrives_with_points_and_range_and_clears_on_deselect(ap
     assert [p["pointNumber"] for p in event["points"]] == [0, 1]
     assert set(event["range"]) == {"x", "y"}
 
-    box = app.locator("#sel .nsewdrag").bounding_box()
-    assert box is not None
-    app.mouse.dblclick(box["x"] + box["width"] * 0.8, box["y"] + box["height"] * 0.5)
+    deselect(app, "sel")
 
     expect(app.locator("#selected_out")).to_have_text("null")
+
+
+def test_a_selection_above_max_event_points_arrives_as_count_and_range_without_points(app: Page):
+    """8 points, a cap of 3: the geometry travels, the points do not, and the value says so."""
+    drag(app, "dense", 0.98, 0.9, 0.02, 0.1)  # bottom right to top left, on purpose
+
+    wait_for_change(app, "dense_out", "-")
+    event = received(app, "dense_out")
+    assert isinstance(event, dict)
+    assert event["points"] is None, "not an empty list: nothing was selected is a different fact"
+    assert event["point_count"] == 8
+    (x0, x1), (y0, y1) = event["range"]["x"], event["range"]["y"]
+    assert x0 < 0 < 7 < x1, "the box the user dragged, in data coordinates"
+    assert y0 < 1 < y1, "min then max on each axis, whichever way the box was dragged"
+
+    deselect(app, "dense")  # a drag inside the existing box would move it, not select
+    expect(app.locator("#dense_out")).to_have_text("null")
+    drag(app, "dense", 0.02, 0.1, 0.25, 0.9)
+
+    wait_for_change(app, "dense_out", "null")
+    event = received(app, "dense_out")
+    assert isinstance(event, dict)
+    assert [p["pointNumber"] for p in event["points"]] == [0, 1], "under the cap: the points"
+    assert "point_count" not in event
 
 
 def test_inputs_are_namespaced_inside_a_module(app: Page):

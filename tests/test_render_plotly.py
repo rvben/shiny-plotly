@@ -101,6 +101,28 @@ def test_unknown_event_names_fail_at_decoration_time():
             return bar()
 
 
+def test_max_event_points_defaults_to_ten_thousand_and_is_recorded():
+    @render_plotly
+    def sales():
+        return bar()
+
+    @render_plotly(max_event_points=None)
+    def unlimited():
+        return bar()
+
+    assert sales.max_event_points == 10_000
+    assert unlimited.max_event_points is None
+
+
+@pytest.mark.parametrize("bad", [0, -5, 2.5, "100", True])
+def test_max_event_points_must_be_a_positive_int_or_none(bad):
+    with pytest.raises(ValueError, match="max_event_points"):
+
+        @render_plotly(max_event_points=bad)
+        def sales():
+            return bar()
+
+
 def test_output_plotly_is_namespaced_inside_a_module():
     @module.ui
     def mod_ui():
@@ -162,6 +184,7 @@ def make_app() -> App:
             config={"displaylogo": False},
             post_script="console.log('{plot_id}')",
             events=["selected", "click"],
+            max_event_points=None,
         )
         def parity_fig():
             return bar()
@@ -208,6 +231,7 @@ def test_sync_figure_is_sent_as_figure_json_for_the_browser_helper_to_draw(value
     assert value["width"] == "100%"
     assert value["post_script"] is None
     assert value["events"] == []
+    assert value["max_event_points"] == 10_000
 
 
 def test_figure_json_is_plotly_serialised_not_shiny_serialised():
@@ -252,6 +276,7 @@ def test_renderer_options_reach_the_value(values):
     assert value["config"] == {"responsive": True, "displaylogo": False}
     assert value["post_script"] == "console.log('{plot_id}')"
     assert value["events"] == ["click", "selected"]
+    assert value["max_event_points"] is None
 
 
 def flush_one(client: TestClient, output_id: str) -> dict:

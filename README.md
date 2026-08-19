@@ -127,6 +127,7 @@ The decorator creates its own output placeholder in Express, just like `@render_
     figurewidget_margins=True,  # the l16/t32/r16/b16 margins shinywidgets applies
     config={"displaylogo": False},
     events=("click", "selected"),  # arrive as input.sales_click, input.sales_selected
+    max_event_points=10_000,  # above it an event carries the count and range, not the points
     post_script=MORE_JS,  # JavaScript run once, when the graph is first drawn
 )
 def sales(): ...
@@ -214,10 +215,46 @@ What arrives is plotly's own event data, cut to what serializes, the same way Da
 | --- | --- |
 | `click` | `{"points": [...]}`; fires on every click, a repeated one too |
 | `hover` | `{"points": [...]}` while over a point, `None` once the pointer leaves; debounced (100 ms) |
-| `selected` | `{"points": [...], "range": {"x": [..], "y": [..]}}` for a box, `lassoPoints` for a lasso; `None` after a double-click deselect |
+| `selected` | `{"points": [...], "range": {"x": [..], "y": [..]}}` for a box, `lassoPoints` for a lasso; `None` after a double-click deselect; above `max_event_points` the points give way to `point_count` (below) |
 | `relayout` | plotly's relayout data as is: `{"xaxis.range[0]": ..., "xaxis.range[1]": ...}` after a zoom or pan, `{"xaxis.autorange": True, ...}` after a reset, `{"dragmode": "pan"}` from the mode bar, `{"autosize": True}` after a resize |
 
 Each point carries plotly's scalar fields for that trace type (`curveNumber`, `pointNumber`, `pointIndex`, `x`, `y`, `z`, `text`, `label`, `value`, `lat`, `lon`, ...) plus `customdata` (as a plain list, also when it was a numpy array), `bbox` and `pointNumbers` when present. `input.<id>_<event>()` raises a silent exception until the event has fired once, so check `is_set()` when the output should show something before that.
+
+#### Dense traces
+
+A point is about 100 bytes of JSON, so a box over a dense trace builds a large message, and a large enough one ends the session: uvicorn closes a websocket on a message above 16 MB by default. `max_event_points` (default 10 000) is the most points one event carries. Above it the points stay in the browser and the value says so, with the selection's geometry intact:
+
+```python
+@render_plotly(events="selected")
+def scatter(): ...
+
+
+@render.text
+def picked():
+    sel = input.scatter_selected()
+    if sel is None:
+        return "Nothing selected."
+    if sel["points"] is not None:
+        return f"{len(sel['points'])} points"
+    # More than max_event_points: {"points": None, "point_count": 120000, "range": {...}}.
+    # The data is here, so membership is a filter on the box the user dragged.
+    (x0, x1), (y0, y1) = sel["range"]["x"], sel["range"]["y"]
+    inside = df[df.x.between(x0, x1) & df.y.between(y0, y1)]
+    return f"{sel['point_count']} points, {len(inside)} rows"
+```
+
+The value is never silently cut: `points` is a full list or `None`, and `point_count` is there when it is `None`. A lasso carries `lassoPoints` (the polygon's `x` and `y` lists) instead of `range`. `max_event_points=None` lifts the cap. Measured with `make bench-events` (one `Scattergl` trace, every point box-selected with a real mouse, headless Chromium and the server on the same laptop, 2026-08-19):
+
+| points | `max_event_points` | event JSON | mouse up to server |
+| --- | --- | --- | --- |
+| 1 000 | 10 000 | 99 kB | 83 ms |
+| 10 000 | 10 000 | 1.01 MB | 149 ms |
+| 100 000 | 10 000 | 136 B | 24 ms |
+| 100 000 | none | 10.33 MB | 1017 ms |
+| 200 000 | 10 000 | 135 B | 108 ms |
+| 200 000 | none | 20.89 MB | disconnected |
+
+`click` and `hover` carry one point per trace under the pointer, so the cap matters for `selected`; hover is also debounced (100 ms), so a pointer sweeping across a dense trace sends one event when it rests, not one per point.
 
 For anything else, `post_script` runs once, after the first figure is drawn, with `{plot_id}` replaced by the graph div's id. Re-renders go through `Plotly.react` into the same graph div, so handlers attached either way stay attached and are never stacked.
 
@@ -311,9 +348,10 @@ make sync        # uv sync --all-groups
 make browsers    # playwright install chromium, once
 make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check, floor check
 make bench       # the shinywidgets comparison above, on this machine
+make bench-events  # what a selection over a dense trace costs, capped and uncapped
 ```
 
-`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module), `extend_traces`, `restyle` and `relayout` applied in place (rolling window, one trace or all, held until the first draw, reset by a re-render, inside a module, dropped with a warning for an unknown output), `post_script` click wiring (once, not stacked), the dark mode recipe, error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
+`make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module, a selection above `max_event_points` arriving as count and range), `extend_traces`, `restyle` and `relayout` applied in place (rolling window, one trace or all, held until the first draw, reset by a re-render, inside a module, dropped with a warning for an unknown output), `post_script` click wiring (once, not stacked), the dark mode recipe, error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
 
 ## License
 
