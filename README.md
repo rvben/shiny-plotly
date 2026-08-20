@@ -53,7 +53,7 @@ uv add shiny-plotly
 pip install shiny-plotly
 ```
 
-Requires Python 3.10+, `shiny>=1.0`, `plotly>=5.0`.
+Requires Python 3.10+, `shiny>=1.0`, `plotly>=5.5`.
 
 ## Use
 
@@ -359,6 +359,10 @@ enable_compressed_plotly_js(app)
 ```
 
 And if a reverse proxy in front of the app does its own compression and caching, or you want Shiny's static serving untouched for any reason, set `SHINY_PLOTLY_NO_COMPRESS=1` in the app's environment; `enable_compressed_plotly_js` then returns `False` and adds nothing.
+
+### Shinylive
+
+Apps using `shiny-plotly` run under [Shinylive](https://shiny.posit.co/py/get-started/shinylive.html) (pyodide in the browser) as well; list `shiny-plotly` in the app's `requirements.txt` next to `plotly`. There is no HTTP server in the browser and pyodide cannot start threads, so the compression route above stands down under pyodide (`enable_compressed_plotly_js` returns `False`); everything else, rendering, events, in-place updates and themes, is browser-side already. Verified against a real `shinylive export`.
 
 ## Examples
 

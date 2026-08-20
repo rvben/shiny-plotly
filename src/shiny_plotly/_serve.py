@@ -20,6 +20,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import os
+import sys
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -161,9 +162,11 @@ def enable_compressed_plotly_js(app: object) -> bool:
 
     Returns True when the route was added, False when it was already there, ``app`` is
     not a Shiny app, or ``SHINY_PLOTLY_NO_COMPRESS`` is set in the environment (the escape
-    hatch for deployments that want Shiny's own static serving untouched).
+    hatch for deployments that want Shiny's own static serving untouched). Under pyodide
+    (shinylive) it is False too: threads cannot start there, and the browser loads assets
+    from the shinylive bundle rather than over HTTP, so there is nothing to compress.
     """
-    if os.environ.get("SHINY_PLOTLY_NO_COMPRESS"):
+    if os.environ.get("SHINY_PLOTLY_NO_COMPRESS") or sys.platform == "emscripten":
         return False
     starlette_app = getattr(app, "starlette_app", None)
     lib_prefix = getattr(app, "lib_prefix", None)

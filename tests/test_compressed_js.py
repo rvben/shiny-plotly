@@ -2,6 +2,8 @@
 
 import gzip
 import pathlib
+import threading
+import types
 
 import plotly
 import plotly.graph_objects as go
@@ -158,6 +160,30 @@ def test_the_environment_can_switch_the_route_off(monkeypatch):
 
     assert _serve.ROUTE_NAME not in names
     assert "cache-control" not in resp.headers, "shiny's own static serving, untouched"
+
+
+def test_under_pyodide_the_route_is_skipped_and_the_app_still_renders(monkeypatch):
+    """shinylive runs apps in pyodide, which cannot start threads and serves its own
+    static assets; the compression route must bow out instead of crashing the session."""
+
+    def no_threads(*args, **kwargs):
+        raise RuntimeError("can't start new thread")
+
+    # Confined to _serve's namespace: the test client itself needs real threads.
+    monkeypatch.setattr(_serve, "sys", types.SimpleNamespace(platform="emscripten"), raising=False)
+    monkeypatch.setattr(
+        _serve,
+        "threading",
+        types.SimpleNamespace(Thread=no_threads, Event=threading.Event, Lock=threading.Lock),
+    )
+
+    app = make_app()
+    assert enable_compressed_plotly_js(app) is False
+    with TestClient(app) as client:
+        start_session(client)  # the render decorator enables it per session; must not crash
+        names = [getattr(r, "name", None) for r in app.starlette_app.router.routes]
+
+    assert _serve.ROUTE_NAME not in names
 
 
 def test_bundle_before_compression_has_finished_is_served_raw_and_cacheable():
