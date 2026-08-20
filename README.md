@@ -332,6 +332,8 @@ async def _highlight():
 
 The values go through plotly's encoder, so numpy arrays, pandas columns and datetimes work. The id is namespaced inside a module, like the output. An update reaches the figure that is drawn at that moment; one sent while the output has no figure (its first render is still running, it sits in a hidden tab, it shows an error or was emptied by `None`) is held and applied, in order, right after the output's next draw. A re-render replaces the figure, updates included, with what the render function returns: the server stays the source of truth, and a figure that should keep its streamed points across a re-render builds them in from server-side state.
 
+A runnable version of the streaming pattern, with a pause switch and a window slider, is `examples/streaming_app.py`.
+
 ### Lower level
 
 - `fig_to_ui(fig, div_id=None, *, height, width, figurewidget_margins, config, post_script)` returns a `TagList` holding the plotly.js dependency, the helper dependency and a `<div class="shiny-plotly">` that draws the figure with `Plotly.newPlot` (plotly's own `to_html` fragment). Use it from a plain `@render.ui` that composes a figure with other UI, or from any htmltools context. Each render draws a fresh graph; an output that is only a figure is better served by `render_plotly`.
@@ -373,6 +375,7 @@ uv run --with shiny-plotly shiny run examples/core_app.py     # fill, margins, a
 uv run --with shiny-plotly shiny run examples/express_app.py  # the Express flavor
 uv run --with shiny-plotly shiny run examples/dark_app.py     # theme="auto" and a custom (light, dark) pair
 uv run --with shiny-plotly shiny run examples/events_app.py   # box selections over a 50k-point trace
+uv run --with shiny-plotly shiny run examples/streaming_app.py # a rolling window fed by extend_traces
 uvx shinylive export examples/shinylive site                  # the same package, running in the browser
 ```
 

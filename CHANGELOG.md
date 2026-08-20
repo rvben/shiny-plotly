@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Three more forwardable events: `doubleclick` arrives as a running count of plot-area double-clicks (plotly hands the event no data; the count's change invalidates the input); `legendclick` and `legenddoubleclick` arrive as the clicked trace's `curve_number`, `expanded_index`, `name` and pre-toggle `visible`, plus `label` for trace types whose legend items are labels. The default toggle and isolate behaviors still happen.
+- `examples/streaming_app.py`: a live rolling window fed by `extend_traces`, with a pause switch and a window slider; a browser test drives the example file itself and proves the stream flows and pauses.
 
 ## [0.3.1](https://github.com/rvben/shiny-plotly/compare/v0.3.0...v0.3.1) - 2026-08-20
 

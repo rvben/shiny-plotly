@@ -1,12 +1,15 @@
 """Run the browser test apps on a real uvicorn server for the playwright tests."""
 
+import importlib.util
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import uvicorn
 from playwright.sync_api import Page
+from shiny import App
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
@@ -20,6 +23,16 @@ from .apps import (
 )
 
 
+def load_example(name: str) -> App:
+    """The ``app`` of an example file, imported as is: the tests drive the real example."""
+    path = Path(__file__).parent.parent.parent / "examples" / name
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.app
+
+
 @pytest.fixture(scope="session")
 def server_url() -> Iterator[str]:
     root = Starlette(
@@ -29,6 +42,7 @@ def server_url() -> Iterator[str]:
             Mount("/live", app=make_live_app()),
             Mount("/dark", app=make_dark_app()),
             Mount("/theme", app=make_theme_app()),
+            Mount("/stream", app=load_example("streaming_app.py")),
             Mount("/", app=make_app()),
         ]
     )

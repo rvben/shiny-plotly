@@ -13,6 +13,7 @@ CORE_EXAMPLES = (
     "core_app.py",
     "events_app.py",
     "dark_app.py",
+    "streaming_app.py",
     "shinylive/app.py",
 )
 
