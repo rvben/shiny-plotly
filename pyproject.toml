@@ -60,6 +60,12 @@ dev = [
   "brotli>=1.1",
 ]
 
+# uv's default cache keys for a local build are the metadata files only, so a source-only
+# change would keep serving the previously built wheel to `uv pip install .` (check-floor
+# once tested a stale build that way). Key the cache on the shipped source too.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*" }]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/shiny_plotly"]
 
