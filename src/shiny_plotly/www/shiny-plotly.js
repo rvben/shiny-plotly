@@ -1,6 +1,7 @@
 // The browser half of shiny-plotly: an output binding that draws render_plotly values and
 // forwards plotly events to Shiny inputs, a handler that applies the in-place updates sent
-// by extend_traces, restyle and relayout, and a size tracker shared with fig_to_ui fragments.
+// by extend_traces, restyle and relayout, a theme switcher that keeps a figure rendered
+// with theme= on the page's color mode, and a size tracker shared with fig_to_ui fragments.
 //
 // The binding keeps one plotly graph div per output. The first figure is drawn with
 // Plotly.newPlot; every later one with Plotly.react, which diffs the figure into the graph
@@ -31,6 +32,7 @@
       var gd = entries[i].target;
       if (!gd.isConnected) {
         observer.unobserve(gd);
+        forget(gd);
         if (window.Plotly) window.Plotly.purge(gd);
         continue;
       }
@@ -53,8 +55,60 @@
 
   function release(gd) {
     if (observer !== null) observer.unobserve(gd);
+    forget(gd);
     if (gd._shinyPlotlyHover) clearTimeout(gd._shinyPlotlyHover.timer);
     if (window.Plotly && gd._fullLayout) window.Plotly.purge(gd);
+  }
+
+  // --- theme: follow the page's color mode ----------------------------------------------
+  // A value rendered with theme= carries both templates and no baked-in one; the mode's
+  // template goes into the figure before it is drawn, and a mode flip relayouts it into
+  // every themed graph on the page, with no server round-trip. The mode is data-bs-theme
+  // on <html> (what ui.input_dark_mode() sets) when present, the OS preference otherwise.
+
+  var themed = []; // graph divs carrying templates for both modes
+  var modeWatcher = null;
+
+  function colorSchemeQuery() {
+    return window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  }
+
+  function pageMode() {
+    var attr = document.documentElement.getAttribute("data-bs-theme");
+    if (attr === "dark" || attr === "light") return attr;
+    var query = colorSchemeQuery();
+    return query && query.matches ? "dark" : "light";
+  }
+
+  function retheme(gd) {
+    // Not drawn yet: relayout would throw; the retheme chained after the draw catches up.
+    if (!gd._shinyPlotlyThemes || !gd._shinyPlotlyDrawn) return Promise.resolve();
+    var mode = pageMode();
+    if (gd._shinyPlotlyMode === mode) return Promise.resolve();
+    gd._shinyPlotlyMode = mode;
+    return window.Plotly.relayout(gd, { template: gd._shinyPlotlyThemes[mode] });
+  }
+
+  function onModeChange() {
+    themed = themed.filter(function (gd) { return gd.isConnected; });
+    themed.forEach(function (gd) { retheme(gd); });
+  }
+
+  function watchMode(gd) {
+    if (themed.indexOf(gd) === -1) themed.push(gd);
+    if (modeWatcher !== null) return;
+    modeWatcher = new MutationObserver(onModeChange);
+    modeWatcher.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-bs-theme"]
+    });
+    var query = colorSchemeQuery();
+    if (query && query.addEventListener) query.addEventListener("change", onModeChange);
+  }
+
+  function forget(gd) {
+    var at = themed.indexOf(gd);
+    if (at !== -1) themed.splice(at, 1);
   }
 
   // --- events to inputs ---------------------------------------------------------------
@@ -184,12 +238,28 @@
     }
     var figure = JSON.parse(value.figure);
     figure.config = value.config;
+    var themes = value.themes ? JSON.parse(value.themes) : null;
+    if (themes) {
+      figure.layout = figure.layout || {};
+      figure.layout.template = themes[pageMode()];
+    }
     var gd = graphDiv(el);
     if (gd) {
-      return window.Plotly.react(gd, figure);
+      gd._shinyPlotlyThemes = themes;
+      if (themes) {
+        gd._shinyPlotlyMode = pageMode();
+        watchMode(gd);
+      }
+      // The retheme covers a mode that flipped while the draw was in flight.
+      return window.Plotly.react(gd, figure).then(function () { return retheme(gd); });
     }
     clear(el); // an error message may be showing
     gd = create(el, value);
+    gd._shinyPlotlyThemes = themes;
+    if (themes) {
+      gd._shinyPlotlyMode = pageMode();
+      watchMode(gd);
+    }
     return window.Plotly.newPlot(gd, figure).then(function () {
       track(gd);
       if (value.events && value.events.length) {
@@ -197,7 +267,7 @@
       }
       runPostScript(gd, value.post_script);
       gd._shinyPlotlyDrawn = true;
-      return applyPending(el, gd);
+      return applyPending(el, gd).then(function () { return retheme(gd); });
     });
   }
 

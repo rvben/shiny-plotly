@@ -316,10 +316,12 @@ def make_live_app() -> App:
 
 
 def make_dark_app() -> App:
-    """The README recipe: template from the color mode input, transparent backgrounds."""
+    """The README recipe next to the theme option, both driven by the color mode input."""
     app_ui = ui.page_fillable(
         ui.input_dark_mode(id="mode", mode="light"),
+        ui.input_action_button("redraw_auto", "redraw auto"),
         ui.card(output_plotly("sales")),
+        ui.card(output_plotly("auto")),
     )
 
     def server(input: Inputs, output: Outputs, session: Session):
@@ -329,5 +331,23 @@ def make_dark_app() -> App:
             fig = bars(3).update_layout(template=template)
             # The page's background shows through, so the graph blends into the card.
             return fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+
+        @render_plotly(theme="auto")
+        def auto():
+            # Independent of input.mode: a mode flip cannot re-render this output, so any
+            # template change a test observes was made in the browser.
+            return bars(3 + input.redraw_auto() % 2)
+
+    return App(app_ui, server)
+
+
+def make_theme_app() -> App:
+    """A theme pair on a page with no color mode input: the OS preference decides."""
+    app_ui = ui.page_fluid(ui.card(output_plotly("styled")))
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme=("seaborn", {"layout": {"font": {"color": "rgb(200, 100, 50)"}}}))
+        def styled():
+            return bars(3)
 
     return App(app_ui, server)

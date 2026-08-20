@@ -128,6 +128,7 @@ The decorator creates its own output placeholder in Express, just like `@render_
     config={"displaylogo": False},
     events=("click", "selected"),  # arrive as input.sales_click, input.sales_selected
     max_event_points=10_000,  # above it an event carries the count and range, not the points
+    theme="auto",  # follow the page's color mode in the browser; also takes (light, dark)
     post_script=MORE_JS,  # JavaScript run once, when the graph is first drawn
 )
 def sales(): ...
@@ -174,7 +175,30 @@ Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a s
 
 ### Dark mode
 
-Plotly does not follow Bootstrap's color mode by itself. Give the dark mode switch an id, read it in the render function to pick the template, and make the figure's backgrounds transparent so the card's own background shows through in both modes:
+Plotly does not follow Bootstrap's color mode by itself. `theme="auto"` makes the figure follow it in the browser, with no server round-trip:
+
+```python
+app_ui = ui.page_fillable(
+    ui.input_dark_mode(),
+    ui.card(output_plotly("sales")),
+)
+
+
+@render_plotly(theme="auto")
+def sales():
+    return px.bar(df, x="month", y="total")
+```
+
+`"auto"` pairs plotly's own templates: `"plotly"` in light mode, `"plotly_dark"` in dark. A `(light, dark)` tuple picks different ones, each a registered name, a plotly `Template` object or a template dict:
+
+```python
+@render_plotly(theme=("seaborn", "plotly_dark"))
+def sales(): ...
+```
+
+How it works: both templates travel with the figure, their `paper_bgcolor` and `plot_bgcolor` made transparent so the card's own background shows through in both modes (backgrounds set on the figure's layout still win). The browser applies the mode's template before the first draw and switches it with `Plotly.relayout` when the mode flips, so the switch is instant and works even while the server is busy. The mode is `data-bs-theme` on `<html>`, which is what `ui.input_dark_mode()` maintains, or the OS `prefers-color-scheme` on a page without that attribute. A template the figure baked in through `layout.template` is dropped for themed outputs; use `theme=None` (the default) where the figure's own template should stand.
+
+The manual alternative, picking the template on the server, still works and is the way to vary anything beyond the template per mode. Give the dark mode switch an id and read it in the render function; flipping the switch then re-renders the figure through `Plotly.react`:
 
 ```python
 app_ui = ui.page_fillable(
@@ -189,8 +213,6 @@ def sales():
     fig = px.bar(df, x="month", y="total", template=template)
     return fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
 ```
-
-Flipping the switch re-renders the figure through `Plotly.react`, the same as any other re-render. `input.mode()` is `"light"` or `"dark"` and follows the user's system preference when the switch is not given an initial `mode`.
 
 ### Events back to Shiny
 

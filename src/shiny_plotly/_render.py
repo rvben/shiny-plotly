@@ -5,6 +5,7 @@ from typing import Any
 
 import plotly.io as pio
 from htmltools import Tag, css, tags
+from plotly.io.json import to_json_plotly
 from shiny.module import resolve_id
 from shiny.render.renderer import Jsonifiable, Renderer, ValueFn
 from shiny.ui.fill import as_fill_item, as_fillable_container
@@ -38,6 +39,59 @@ def normalize_events(events: str | Iterable[str] | None) -> tuple[str, ...]:
             f"events must be among {', '.join(EVENTS)}"
         )
     return tuple(name for name in EVENTS if name in names)
+
+
+# One theme template: a registered name ("plotly_dark"), a plotly Template object, or a
+# template dict ({"layout": {...}, "data": {...}}).
+TemplateSpec = str | Mapping[str, Any] | Any
+
+
+ThemePair = tuple[TemplateSpec, TemplateSpec]
+
+
+def normalize_theme(theme: str | ThemePair | None) -> ThemePair | None:
+    """``None``, or a validated (light, dark) pair of template specs."""
+    if theme is None:
+        return None
+    if isinstance(theme, str):
+        if theme == "auto":
+            return ("plotly", "plotly_dark")
+        raise ValueError(
+            f'theme must be "auto" or a (light, dark) pair of templates, got {theme!r}; '
+            "for one template in both modes, set layout.template on the figure instead"
+        )
+    pair = tuple(theme)
+    if len(pair) != 2:
+        raise ValueError(f"theme must be a (light, dark) pair of templates, got {len(pair)}")
+    for spec in pair:
+        if isinstance(spec, str):
+            if spec not in pio.templates:
+                raise ValueError(
+                    f"unknown template name {spec!r}; the registered names are "
+                    + ", ".join(sorted(pio.templates))
+                )
+        elif not isinstance(spec, Mapping) and not callable(getattr(spec, "to_plotly_json", None)):
+            raise ValueError(
+                "a theme template must be a registered name, a plotly Template object "
+                f"or a template dict, got {type(spec).__name__}"
+            )
+    return pair
+
+
+def _template_json(spec: TemplateSpec) -> dict[str, Any]:
+    """The template as a plain dict, backgrounds made transparent in a copy."""
+    template: Any = pio.templates[spec] if isinstance(spec, str) else spec
+    to_json = getattr(template, "to_plotly_json", None)
+    raw: Any = to_json() if callable(to_json) else template
+    out: dict[str, Any] = dict(raw)
+    layout = dict(out.get("layout") or {})
+    # The page's own background shows through, so the graph matches the surface it sits
+    # on in both modes. A paper_bgcolor or plot_bgcolor set on the figure's layout still
+    # wins, as figure values always do over template values.
+    layout["paper_bgcolor"] = "rgba(0,0,0,0)"
+    layout["plot_bgcolor"] = "rgba(0,0,0,0)"
+    out["layout"] = layout
+    return out
 
 
 def normalize_max_event_points(value: int | None) -> int | None:
@@ -136,6 +190,19 @@ class render_plotly(Renderer[Figure]):
         data is. At 10 000 points an event is about 1 MB; ``None`` lifts the cap, and a
         selection of 150 000 points or more then exceeds the 16 MB websocket message
         limit uvicorn applies by default, which closes the session.
+    theme
+        Make the figure follow the page's color mode, in the browser, with no server
+        round-trip. ``"auto"`` uses plotly's own pair: the ``"plotly"`` template in light
+        mode and ``"plotly_dark"`` in dark. A ``(light, dark)`` pair picks the templates,
+        each a registered name (``"seaborn"``), a plotly ``Template`` object or a template
+        dict. Both templates travel with the figure, with transparent ``paper_bgcolor``
+        and ``plot_bgcolor`` so the page shows through (a figure-level background still
+        wins); a template the figure baked in via ``layout.template`` is dropped. The
+        browser applies the mode's template before the first draw and switches it with
+        ``Plotly.relayout`` when the mode flips: it follows ``data-bs-theme`` on ``<html>``
+        (what ``ui.input_dark_mode()`` sets) when present, the OS ``prefers-color-scheme``
+        otherwise. Template names resolve when the decorator runs; an unknown name raises
+        right there. Default ``None``: the figure's own template, fixed.
     """
 
     def __init__(
@@ -149,6 +216,7 @@ class render_plotly(Renderer[Figure]):
         post_script: str | None = None,
         events: str | Iterable[str] | None = None,
         max_event_points: int | None = DEFAULT_MAX_EVENT_POINTS,
+        theme: str | ThemePair | None = None,
     ) -> None:
         self.height = height
         self.width = width
@@ -157,6 +225,16 @@ class render_plotly(Renderer[Figure]):
         self.post_script = post_script
         self.events = normalize_events(events)
         self.max_event_points = normalize_max_event_points(max_event_points)
+        self.theme = normalize_theme(theme)
+        if self.theme is None:
+            self._themes_json = None
+        else:
+            # Resolved and serialized once, here, so an unknown name fails at decoration
+            # time and a render costs nothing extra.
+            light, dark = self.theme
+            self._themes_json = to_json_plotly(
+                {"light": _template_json(light), "dark": _template_json(dark)}
+            )
         # Registers _fn (sets output_id from its name) when used as a bare decorator.
         super().__init__(_fn)  # type: ignore[arg-type]
 
@@ -175,6 +253,12 @@ class render_plotly(Renderer[Figure]):
         fig_dict = as_fig_dict(value)
         if self.figurewidget_margins:
             fill_in_margins(fig_dict)
+        if self._themes_json is not None:
+            # The browser picks the mode's template; the one the figure baked in at
+            # construction would only add dead weight and a flash of the wrong theme.
+            layout = fig_dict.get("layout")
+            if isinstance(layout, dict):
+                layout.pop("template", None)
         return {
             # Serialised by plotly, not Shiny: numpy and pandas values, datetimes and the
             # compact base64 array encoding only work through plotly's encoder.
@@ -185,4 +269,5 @@ class render_plotly(Renderer[Figure]):
             "post_script": self.post_script,
             "events": list(self.events),
             "max_event_points": self.max_event_points,
+            "themes": self._themes_json,
         }

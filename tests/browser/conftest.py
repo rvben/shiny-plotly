@@ -10,7 +10,14 @@ from playwright.sync_api import Page
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from .apps import make_app, make_dark_app, make_events_app, make_lazy_app, make_live_app
+from .apps import (
+    make_app,
+    make_dark_app,
+    make_events_app,
+    make_lazy_app,
+    make_live_app,
+    make_theme_app,
+)
 
 
 @pytest.fixture(scope="session")
@@ -21,6 +28,7 @@ def server_url() -> Iterator[str]:
             Mount("/events", app=make_events_app()),
             Mount("/live", app=make_live_app()),
             Mount("/dark", app=make_dark_app()),
+            Mount("/theme", app=make_theme_app()),
             Mount("/", app=make_app()),
         ]
     )

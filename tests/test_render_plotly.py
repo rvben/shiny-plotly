@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import plotly
 import plotly.graph_objects as go
@@ -123,6 +124,55 @@ def test_max_event_points_must_be_a_positive_int_or_none(bad):
             return bar()
 
 
+def test_theme_auto_is_the_plotly_light_dark_pair():
+    @render_plotly(theme="auto")
+    def sales():
+        return bar()
+
+    assert sales.theme == ("plotly", "plotly_dark")
+
+
+def test_theme_defaults_to_none():
+    @render_plotly
+    def sales():
+        return bar()
+
+    assert sales.theme is None
+
+
+def test_a_bare_template_name_is_rejected_with_the_alternative_spelled_out():
+    with pytest.raises(ValueError, match=r'"auto".*pair.*layout\.template'):
+
+        @render_plotly(theme="plotly_dark")
+        def sales():
+            return bar()
+
+
+def test_an_unknown_template_name_fails_at_decoration_time():
+    with pytest.raises(ValueError, match=r"plotly_drak.*plotly_dark"):
+
+        @render_plotly(theme=("plotly", "plotly_drak"))
+        def sales():
+            return bar()
+
+
+def test_a_theme_pair_must_have_exactly_two_templates():
+    three: Any = ("plotly", "plotly_dark", "seaborn")
+    with pytest.raises(ValueError, match="pair"):
+
+        @render_plotly(theme=three)
+        def sales():
+            return bar()
+
+
+def test_a_theme_template_must_be_a_name_a_template_object_or_a_dict():
+    with pytest.raises(ValueError, match="Template"):
+
+        @render_plotly(theme=("plotly", 7))
+        def sales():
+            return bar()
+
+
 def test_output_plotly_is_namespaced_inside_a_module():
     @module.ui
     def mod_ui():
@@ -162,6 +212,7 @@ def make_app() -> App:
         output_plotly("async_fig"),
         output_plotly("empty_fig"),
         output_plotly("parity_fig"),
+        output_plotly("themed_fig"),
     )
 
     def server(input: Inputs, output: Outputs, session: Session):
@@ -189,10 +240,14 @@ def make_app() -> App:
         def parity_fig():
             return bar()
 
+        @render_plotly(theme="auto")
+        def themed_fig():
+            return bar()
+
     return App(app_ui, server)
 
 
-OUTPUT_IDS = ("sync_fig", "async_fig", "empty_fig", "parity_fig")
+OUTPUT_IDS = ("sync_fig", "async_fig", "empty_fig", "parity_fig", "themed_fig")
 
 
 def first_flush(client: TestClient) -> dict:
@@ -277,6 +332,62 @@ def test_renderer_options_reach_the_value(values):
     assert value["post_script"] == "console.log('{plot_id}')"
     assert value["events"] == ["click", "selected"]
     assert value["max_event_points"] is None
+
+
+def test_theme_auto_sends_both_templates_and_strips_the_figure_baked_in_one(values):
+    value = values["themed_fig"]
+
+    themes = json.loads(value["themes"])
+    assert set(themes) == {"light", "dark"}
+    assert themes["light"]["layout"]["font"]["color"] == "#2a3f5f", "the plotly template"
+    assert themes["dark"]["layout"]["font"]["color"] == "#f2f5fa", "the plotly_dark template"
+    for template in themes.values():
+        assert template["layout"]["paper_bgcolor"] == "rgba(0,0,0,0)", "the page shows through"
+        assert template["layout"]["plot_bgcolor"] == "rgba(0,0,0,0)"
+    figure = json.loads(value["figure"])
+    assert "template" not in figure["layout"], "the browser applies the mode's template"
+    assert figure["data"][0]["type"] == "bar", "the figure itself is untouched"
+
+
+def test_without_a_theme_the_value_has_no_templates_and_the_figure_keeps_its_own(values):
+    value = values["sync_fig"]
+
+    assert value["themes"] is None
+    assert "template" in json.loads(value["figure"])["layout"]
+
+
+def test_a_custom_theme_pair_travels_resolved_with_transparent_backgrounds():
+    """A registered Template object and a plain dict, the two non-name spellings."""
+    import plotly.io as pio
+
+    app_ui = ui.page_fluid(output_plotly("fig"))
+
+    dark = {"layout": {"font": {"color": "rgb(1, 2, 3)"}}}
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme=(pio.templates["seaborn"], dark))
+        def fig():
+            return bar()
+
+    with TestClient(App(app_ui, server)) as client:
+        value = flush_one(client, "fig")
+
+    themes = json.loads(value["themes"])
+    assert themes["light"]["layout"]["font"]["color"] == "rgb(36,36,36)", "seaborn's text color"
+    assert themes["dark"]["layout"]["font"]["color"] == "rgb(1, 2, 3)"
+    for template in themes.values():
+        assert template["layout"]["paper_bgcolor"] == "rgba(0,0,0,0)"
+        assert template["layout"]["plot_bgcolor"] == "rgba(0,0,0,0)"
+
+
+def test_a_theme_dict_template_is_not_mutated_by_the_transparency_fill():
+    custom = {"layout": {"font": {"color": "white"}}}
+
+    @render_plotly(theme=("plotly", custom))
+    def sales():
+        return bar()
+
+    assert custom == {"layout": {"font": {"color": "white"}}}
 
 
 def flush_one(client: TestClient, output_id: str) -> dict:
