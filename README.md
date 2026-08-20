@@ -362,13 +362,16 @@ And if a reverse proxy in front of the app does its own compression and caching,
 
 ### Shinylive
 
-Apps using `shiny-plotly` run under [Shinylive](https://shiny.posit.co/py/get-started/shinylive.html) (pyodide in the browser) as well; list `shiny-plotly` in the app's `requirements.txt` next to `plotly`. There is no HTTP server in the browser and pyodide cannot start threads, so the compression route above stands down under pyodide (`enable_compressed_plotly_js` returns `False`); everything else, rendering, events, in-place updates and themes, is browser-side already. Verified against a real `shinylive export`.
+Apps using `shiny-plotly` run under [Shinylive](https://shiny.posit.co/py/get-started/shinylive.html) (pyodide in the browser) as well; list `shiny-plotly` in the app's `requirements.txt` next to `plotly`. There is no HTTP server in the browser and pyodide cannot start threads, so the compression route above stands down under pyodide (`enable_compressed_plotly_js` returns `False`); everything else, rendering, events, in-place updates and themes, is browser-side already. Verified against a real `shinylive export`; `examples/shinylive/` is a ready-to-export app.
 
 ## Examples
 
 ```sh
-uv run --with shiny-plotly shiny run examples/core_app.py
-uv run --with shiny-plotly shiny run examples/express_app.py
+uv run --with shiny-plotly shiny run examples/core_app.py     # fill, margins, a click input, a live stream
+uv run --with shiny-plotly shiny run examples/express_app.py  # the Express flavor
+uv run --with shiny-plotly shiny run examples/dark_app.py     # theme="auto" and a custom (light, dark) pair
+uv run --with shiny-plotly shiny run examples/events_app.py   # box selections over a 50k-point trace
+uvx shinylive export examples/shinylive site                  # the same package, running in the browser
 ```
 
 ## Development

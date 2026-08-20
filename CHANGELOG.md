@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `@render_plotly(theme="auto")`: the figure follows the page's color mode in the browser, with no server round-trip. `"auto"` pairs plotly's `"plotly"` and `"plotly_dark"` templates; a `(light, dark)` tuple picks others, each a registered name, a `Template` object or a template dict. Both templates travel with the figure with transparent backgrounds so the page shows through; the browser applies the mode's template before the first draw and switches it with `Plotly.relayout` when `data-bs-theme` (what `ui.input_dark_mode()` sets) or the OS `prefers-color-scheme` flips. Unknown template names raise at decoration time.
 - The in-place update family is complete: `add_traces`, `delete_traces`, `prepend_traces` and `update` (a restyle and a relayout in one redraw) join `extend_traces`, `restyle` and `relayout`. Same contract as the first three: values through plotly's encoder, ids namespaced inside a module, updates held and applied in order while the output has no figure drawn.
+- Examples for dark mode (`examples/dark_app.py`), dense-trace selections (`examples/events_app.py`) and a ready-to-export shinylive app (`examples/shinylive/`); a test keeps every example building.
 
 ### Fixed
 

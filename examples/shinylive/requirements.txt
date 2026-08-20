@@ -1,0 +1,3 @@
+# 0.3.0 started a thread at session start, which pyodide cannot do; newer versions skip it.
+shiny-plotly>0.3.0
+plotly
