@@ -95,11 +95,20 @@ def test_a_single_event_name_is_accepted_as_a_string():
 
 
 def test_unknown_event_names_fail_at_decoration_time():
-    with pytest.raises(ValueError, match=r"plotly_clack.*click, hover, selected, relayout"):
+    expected = "click, doubleclick, hover, selected, relayout, legendclick, legenddoubleclick"
+    with pytest.raises(ValueError, match=rf"plotly_clack.*{expected}"):
 
         @render_plotly(events=("click", "plotly_clack"))
         def sales():
             return bar()
+
+
+def test_the_double_click_and_legend_events_are_accepted():
+    @render_plotly(events=("legenddoubleclick", "doubleclick", "legendclick"))
+    def sales():
+        return bar()
+
+    assert sales.events == ("doubleclick", "legendclick", "legenddoubleclick")
 
 
 def test_max_event_points_defaults_to_ten_thousand_and_is_recorded():

@@ -162,6 +162,20 @@
     return out;
   }
 
+  // A legend event names a trace, not points: the trace's index and, because the event
+  // fires before the default toggle, the visibility the click is about to change. For a
+  // trace type whose legend items are labels (pie, funnelarea) plotly adds the label.
+  function legendData(gd, ev) {
+    var out = { curve_number: ev.curveNumber, expanded_index: ev.expandedIndex };
+    var trace = gd._fullData && gd._fullData[ev.curveNumber];
+    if (trace) {
+      out.name = trace.name;
+      out.visible = trace.visible;
+    }
+    if (ev.label !== undefined) out.label = ev.label;
+    return out;
+  }
+
   // Wires the requested plotly events of one graph div to inputs named <output id>_<event>.
   // Called once per graph div, right after its first draw; Plotly.react keeps the handlers.
   function attachEvents(gd, outputId, names, maxPoints) {
@@ -189,6 +203,18 @@
         gd.on("plotly_deselect", function () { send("selected", null); });
       } else if (name === "relayout") {
         gd.on("plotly_relayout", function (ev) { send("relayout", relayoutData(ev)); });
+      } else if (name === "doubleclick") {
+        // The event hands its handler nothing, so the value is a count kept on the graph
+        // div: it changes on every double-click, which is what invalidates the input.
+        gd.on("plotly_doubleclick", function () {
+          gd._shinyPlotlyDblclicks = (gd._shinyPlotlyDblclicks || 0) + 1;
+          send("doubleclick", gd._shinyPlotlyDblclicks);
+        });
+      } else if (name === "legendclick" || name === "legenddoubleclick") {
+        // priority event, like click: a repeated click on the same item counts again.
+        gd.on("plotly_" + name, function (ev) {
+          send(name, legendData(gd, ev), { priority: "event" });
+        });
       }
     });
   }

@@ -216,7 +216,7 @@ def sales():
 
 ### Events back to Shiny
 
-`events=` names the plotly events to forward; each arrives as `input.<id>_<event>`, namespaced like the output inside a module. Four are available: `click`, `hover`, `selected` and `relayout`.
+`events=` names the plotly events to forward; each arrives as `input.<id>_<event>`, namespaced like the output inside a module. Seven are available: `click`, `doubleclick`, `hover`, `selected`, `relayout`, `legendclick` and `legenddoubleclick`.
 
 ```python
 @render_plotly(events=("click", "selected"))
@@ -239,6 +239,9 @@ What arrives is plotly's own event data, cut to what serializes, the same way Da
 | `hover` | `{"points": [...]}` while over a point, `None` once the pointer leaves; debounced (100 ms) |
 | `selected` | `{"points": [...], "range": {"x": [..], "y": [..]}}` for a box, `lassoPoints` for a lasso; `None` after a double-click deselect; above `max_event_points` the points give way to `point_count` (below) |
 | `relayout` | plotly's relayout data as is: `{"xaxis.range[0]": ..., "xaxis.range[1]": ...}` after a zoom or pan, `{"xaxis.autorange": True, ...}` after a reset, `{"dragmode": "pan"}` from the mode bar, `{"autosize": True}` after a resize |
+| `doubleclick` | a running count of double-clicks on the plot area (the gesture that resets the axes); plotly hands the event no data, and the count's change is what invalidates the input |
+| `legendclick` | `{"curve_number": 1, "expanded_index": 1, "name": "beta", "visible": True}` for the trace whose legend item was clicked, `visible` as it stood before the click's toggle (`True` or `"legendonly"`); trace types whose legend items are labels (pie, funnelarea) add `label`; fires on every click, and the default toggle still happens |
+| `legenddoubleclick` | same value as `legendclick`; the default isolate-this-trace behavior still happens |
 
 Each point carries plotly's scalar fields for that trace type (`curveNumber`, `pointNumber`, `pointIndex`, `x`, `y`, `z`, `text`, `label`, `value`, `lat`, `lon`, ...) plus `customdata` (as a plain list, also when it was a numpy array), `bbox` and `pointNumbers` when present. `input.<id>_<event>()` raises a silent exception until the event has fired once, so check `is_set()` when the output should show something before that.
 
@@ -281,15 +284,14 @@ The value is never silently cut: `points` is a full list or `None`, and `point_c
 For anything else, `post_script` runs once, after the first figure is drawn, with `{plot_id}` replaced by the graph div's id. Re-renders go through `Plotly.react` into the same graph div, so handlers attached either way stay attached and are never stacked.
 
 ```python
-LEGEND_TO_INPUT = """
-document.getElementById('{plot_id}').on('plotly_legendclick', function (ev) {
-    Shiny.setInputValue('legend', ev.curveNumber, {priority: 'event'});
-    return true;  // let plotly toggle the trace as usual
+ANNOTATION_TO_INPUT = """
+document.getElementById('{plot_id}').on('plotly_clickannotation', function (ev) {
+    Shiny.setInputValue('annotation', ev.index, {priority: 'event'});
 });
 """
 
 
-@render_plotly(post_script=LEGEND_TO_INPUT)
+@render_plotly(post_script=ANNOTATION_TO_INPUT)
 def scatter(): ...
 ```
 

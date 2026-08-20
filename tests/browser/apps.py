@@ -127,12 +127,16 @@ def make_events_app() -> App:
         output_plotly("fig", height="300px", width="500px"),
         output_plotly("sel", height="300px", width="500px"),
         output_plotly("dense", height="300px", width="500px"),
+        output_plotly("leg", height="300px", width="500px"),
         ui.output_text("click_out"),
         ui.output_text("click_count"),
         ui.output_text("hover_out"),
         ui.output_text("relayout_out"),
         ui.output_text("selected_out"),
         ui.output_text("dense_out"),
+        ui.output_text("legendclick_out"),
+        ui.output_text("legenddbl_out"),
+        ui.output_text("dbl_out"),
         events_mod_ui("m"),
     )
 
@@ -155,6 +159,12 @@ def make_events_app() -> App:
         def dense():
             fig = go.Figure(go.Scatter(x=list(range(8)), y=[1] * 8, mode="markers"))
             return fig.update_layout(dragmode="select")
+
+        @render_plotly(events=("doubleclick", "legendclick", "legenddoubleclick"))
+        def leg():
+            return go.Figure(
+                [go.Scatter(y=[1, 2], name="alpha"), go.Scatter(y=[2, 1], name="beta")]
+            )
 
         @reactive.effect
         @reactive.event(input.fig_click)
@@ -184,6 +194,20 @@ def make_events_app() -> App:
         @render.text
         def dense_out():
             return as_text(input.dense_selected()) if input.dense_selected.is_set() else "-"
+
+        @render.text
+        def legendclick_out():
+            return as_text(input.leg_legendclick()) if input.leg_legendclick.is_set() else "-"
+
+        @render.text
+        def legenddbl_out():
+            if not input.leg_legenddoubleclick.is_set():
+                return "-"
+            return as_text(input.leg_legenddoubleclick())
+
+        @render.text
+        def dbl_out():
+            return as_text(input.leg_doubleclick()) if input.leg_doubleclick.is_set() else "-"
 
         events_mod_server("m")
 

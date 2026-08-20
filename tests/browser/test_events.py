@@ -16,6 +16,7 @@ def app(page: Page, server_url: str, errors: list[str]) -> Iterator[Page]:
     page.goto(server_url + "/events/")
     expect(page.locator(f"#fig {SVG}").first).to_be_visible()
     expect(page.locator(f"#sel {SVG}").first).to_be_visible()
+    expect(page.locator(f"#leg {SVG}").first).to_be_visible()
     expect(page.locator(f"#m-fig {SVG}").first).to_be_visible()
     expect(page.locator("#click_out")).to_have_text("-")
     yield page
@@ -150,6 +151,58 @@ def test_a_selection_above_max_event_points_arrives_as_count_and_range_without_p
     assert isinstance(event, dict)
     assert [p["pointNumber"] for p in event["points"]] == [0, 1], "under the cap: the points"
     assert "point_count" not in event
+
+
+def legend_item(page: Page, output_id: str, index: int) -> Locator:
+    return page.locator(f"#{output_id} .legend .traces").nth(index)
+
+
+def plot_dblclick(page: Page, output_id: str) -> None:
+    drag_area = page.locator(f"#{output_id} .nsewdrag")
+    drag_area.scroll_into_view_if_needed()  # mouse coordinates are viewport coordinates
+    box = drag_area.bounding_box()
+    assert box is not None
+    page.mouse.dblclick(box["x"] + box["width"] * 0.5, box["y"] + box["height"] * 0.5)
+
+
+def test_a_legend_click_reports_the_trace_and_its_pre_toggle_visibility(app: Page):
+    legend_item(app, "leg", 1).click(force=True)
+
+    wait_for_change(app, "legendclick_out", "-")
+    first = received(app, "legendclick_out")
+    assert first == {"curve_number": 1, "expanded_index": 1, "name": "beta", "visible": True}
+
+    # Past plotly's double-click window, so the second click is a single click again, on a
+    # trace the first click has hidden by now.
+    app.wait_for_timeout(400)
+    previous = app.locator("#legendclick_out").inner_text()
+    legend_item(app, "leg", 1).click(force=True)
+
+    wait_for_change(app, "legendclick_out", previous)
+    second = received(app, "legendclick_out")
+    assert isinstance(second, dict)
+    assert second["visible"] == "legendonly", "the state before this click's toggle"
+
+
+def test_a_legend_double_click_arrives_with_the_trace(app: Page):
+    legend_item(app, "leg", 0).dblclick(force=True)
+
+    wait_for_change(app, "legenddbl_out", "-")
+    event = received(app, "legenddbl_out")
+    assert isinstance(event, dict)
+    assert event["curve_number"] == 0
+    assert event["name"] == "alpha"
+
+
+def test_a_double_click_on_the_plot_arrives_as_a_running_count(app: Page):
+    plot_dblclick(app, "leg")
+
+    expect(app.locator("#dbl_out")).to_have_text("1")
+
+    app.wait_for_timeout(400)
+    plot_dblclick(app, "leg")
+
+    expect(app.locator("#dbl_out")).to_have_text("2")
 
 
 def test_inputs_are_namespaced_inside_a_module(app: Page):

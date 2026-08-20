@@ -17,7 +17,15 @@ from ._serve import enable_compressed_plotly_js
 __all__ = ("DEFAULT_MAX_EVENT_POINTS", "EVENTS", "output_plotly", "render_plotly")
 
 # Plotly events that can be forwarded to Shiny inputs, in the order they are sent.
-EVENTS = ("click", "hover", "selected", "relayout")
+EVENTS = (
+    "click",
+    "doubleclick",
+    "hover",
+    "selected",
+    "relayout",
+    "legendclick",
+    "legenddoubleclick",
+)
 
 # Points per event above which the browser sends the count and the selection's geometry
 # instead of the points. Each point is about 100 bytes of JSON; at this cap an event is
@@ -170,18 +178,26 @@ class render_plotly(Renderer[Figure]):
         ``{plot_id}`` replaced by the graph div's id. For anything the ``events`` option
         does not cover; handlers attached here stay attached across re-renders.
     events
-        Plotly events to forward to Shiny inputs: any of ``"click"``, ``"hover"``,
-        ``"selected"`` and ``"relayout"`` (one name or an iterable of names). Each arrives
-        as ``input.<id>_<event>``, namespaced like the output inside a module.
+        Plotly events to forward to Shiny inputs: any of ``"click"``, ``"doubleclick"``,
+        ``"hover"``, ``"selected"``, ``"relayout"``, ``"legendclick"`` and
+        ``"legenddoubleclick"`` (one name or an iterable of names). Each arrives as
+        ``input.<id>_<event>``, namespaced like the output inside a module.
         ``click``, ``hover`` and ``selected`` carry ``{"points": [...]}`` where each point
         holds plotly's scalar fields (``curveNumber``, ``pointNumber``, ``pointIndex``,
         ``x``, ``y``, ``z``, ``text``, ``label``, ``value``, ...) plus ``customdata``,
         ``bbox`` and ``pointNumbers`` when present; a box or lasso selection adds ``range``
         or ``lassoPoints``. ``relayout`` carries plotly's relayout data as is (zoom and pan
         ranges, ``autorange``, ``dragmode``; a resize reports ``{"autosize": true}``).
-        A click fires on every click, repeated or not; hover is debounced and becomes
-        ``None`` once the pointer leaves the graph; a double-click deselect sets
-        ``selected`` to ``None``.
+        ``doubleclick`` (the double-click on the plot area that resets the axes) carries a
+        running count of double-clicks, since plotly hands it no data; the change is what
+        invalidates the input. ``legendclick`` and ``legenddoubleclick`` carry
+        ``{"curve_number", "expanded_index", "name", "visible"}`` for the trace whose
+        legend item was clicked, with ``visible`` as it stood before the click's toggle
+        (``True`` or ``"legendonly"``), plus ``label`` for trace types whose legend items
+        are labels (pie, funnelarea); the default toggle still happens.
+        A click fires on every click, repeated or not, and so do the legend events; hover
+        is debounced and becomes ``None`` once the pointer leaves the graph; a
+        double-click deselect sets ``selected`` to ``None``.
     max_event_points
         The most points one event carries, 10 000 by default. An event with more points
         (a box or lasso over a dense trace) arrives with ``"points": None`` and
