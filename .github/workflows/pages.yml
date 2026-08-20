@@ -1,0 +1,61 @@
+name: Pages
+
+# Builds the shinylive demo from the current checkout and deploys it to GitHub Pages,
+# after proving in a real browser that it renders (make site-check). Every step is a
+# make target, so the same build and the same proof run locally.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          # Pinned to the version CI proves changes with; see ci.yml.
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync
+        run: make sync
+
+      - name: Install Chromium
+        run: make browsers PLAYWRIGHT_ARGS=--with-deps
+
+      - name: Build the site and prove it renders
+        run: make site-check
+
+      - name: Rebuild against the public URL
+        run: make site SITE_URL=https://rvben.github.io/shiny-plotly
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

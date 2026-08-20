@@ -1,5 +1,6 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-events check version check-version release-notes publish clean release-patch release-minor release-major
+	check-floor bench bench-events check version check-version release-notes publish clean \
+	site site-check release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
 
@@ -85,6 +86,31 @@ bench:
 bench-events:
 	uv run python -m bench.events $(BENCH_ARGS)
 
+# Pinned: the demo build runs only in the Pages workflow, so a shinylive release
+# could break the deploy with no CI run ever having seen it. Bump deliberately.
+SHINYLIVE_VERSION := 0.8.11
+SITE_URL ?= http://127.0.0.1:8008
+
+# Exports the shinylive demo app with the wheel built from this checkout, so the
+# deployed demo tracks main, not PyPI. The committed examples/shinylive stays a
+# user-exportable example (its requirements.txt installs from PyPI); this target
+# rewrites a copy to install the local wheel by absolute URL, because micropip
+# resolves only http(s) URLs or index names, never bare filenames.
+site: build
+	rm -rf site tmp/site-src
+	mkdir -p tmp/site-src
+	cp examples/shinylive/app.py tmp/site-src/app.py
+	printf '%s\n' "$(SITE_URL)/wheels/$$(basename dist/*.whl)" plotly > tmp/site-src/requirements.txt
+	uvx shinylive==$(SHINYLIVE_VERSION) export tmp/site-src site
+	mkdir -p site/wheels
+	cp dist/*.whl site/wheels/
+
+# Serves the exported site and proves the demo renders in Chromium: pyodide boots,
+# the wheel installs, the stream ticks, the Explore tab draws. The Pages workflow
+# runs this before rebuilding with the public URL and deploying.
+site-check: site
+	uv run python tools/site_check.py --site site --url $(SITE_URL)
+
 # The version in pyproject.toml, the single source for the package version.
 version:
 	@sed -n 's/^version = "\(.*\)"$$/\1/p' pyproject.toml
@@ -114,7 +140,7 @@ publish:
 	uv publish --trusted-publishing always --check-url https://pypi.org/simple/shiny-plotly/ dist/*
 
 clean:
-	rm -rf dist tmp .wheel-venv .floor-venv .pytest_cache .ruff_cache
+	rm -rf dist tmp site .wheel-venv .floor-venv .pytest_cache .ruff_cache
 
 release-patch:
 	vership bump patch

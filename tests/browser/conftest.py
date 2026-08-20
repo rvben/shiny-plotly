@@ -43,6 +43,7 @@ def server_url() -> Iterator[str]:
             Mount("/dark", app=make_dark_app()),
             Mount("/theme", app=make_theme_app()),
             Mount("/stream", app=load_example("streaming_app.py")),
+            Mount("/demo", app=load_example("shinylive/app.py")),
             Mount("/", app=make_app()),
         ]
     )

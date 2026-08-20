@@ -85,7 +85,7 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["src", "tests", "examples", "bench"]
+include = ["src", "tests", "examples", "bench", "tools"]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 

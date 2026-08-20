@@ -7,6 +7,8 @@ Render [plotly](https://plotly.com/python/) figures in [Shiny for Python](https:
 [![PyPI](https://img.shields.io/pypi/v/shiny-plotly)](https://pypi.org/project/shiny-plotly/)
 [![CI](https://github.com/rvben/shiny-plotly/actions/workflows/ci.yml/badge.svg)](https://github.com/rvben/shiny-plotly/actions/workflows/ci.yml)
 
+**[Try the live demo](https://rvben.github.io/shiny-plotly/)**: a streaming figure and forwarded plotly events, running entirely in your browser through shinylive.
+
 ```python
 from shiny_plotly import output_plotly, render_plotly
 
@@ -366,7 +368,7 @@ And if a reverse proxy in front of the app does its own compression and caching,
 
 ### Shinylive
 
-Apps using `shiny-plotly` run under [Shinylive](https://shiny.posit.co/py/get-started/shinylive.html) (pyodide in the browser) as well; list `shiny-plotly` in the app's `requirements.txt` next to `plotly`. There is no HTTP server in the browser and pyodide cannot start threads, so the compression route above stands down under pyodide (`enable_compressed_plotly_js` returns `False`); everything else, rendering, events, in-place updates and themes, is browser-side already. Verified against a real `shinylive export`; `examples/shinylive/` is a ready-to-export app.
+Apps using `shiny-plotly` run under [Shinylive](https://shiny.posit.co/py/get-started/shinylive.html) (pyodide in the browser) as well; list `shiny-plotly` in the app's `requirements.txt` next to `plotly`. There is no HTTP server in the browser and pyodide cannot start threads, so the compression route above stands down under pyodide (`enable_compressed_plotly_js` returns `False`); everything else, rendering, events, in-place updates and themes, is browser-side already. Verified against a real `shinylive export`; `examples/shinylive/` is a ready-to-export app, and its deployed copy is the [live demo](https://rvben.github.io/shiny-plotly/). The Pages workflow builds that demo from the current checkout's wheel (`make site`) and deploys only after a headless Chromium has watched both tabs render (`make site-check`).
 
 ## Examples
 
