@@ -26,8 +26,8 @@ classifiers = [
   "Typing :: Typed",
 ]
 # The floor is what `make check-floor` installs and tests: plotly 5.5 is the first with
-# to_html(div_id=...), shiny 1.0 the first with the Renderer API, and htmltools 0.5.2 is
-# what shiny 1.0 itself requires.
+# to_html(div_id=...), shiny 1.0 is the oldest release the suite runs against, and
+# htmltools 0.5.2 is what shiny 1.0 itself requires.
 dependencies = [
   "shiny>=1.0",
   "plotly>=5.5",
