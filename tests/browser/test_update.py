@@ -96,6 +96,33 @@ def test_a_re_render_replaces_the_figure_updates_included(app: Page):
     expect(app.locator("#live .gtitle")).to_have_count(0)
 
 
+def test_add_and_delete_traces_change_the_figure_and_the_drawing_follows(app: Page):
+    app.click("#addtrace")
+    wait_for(app, f"{gd('live')}.data.length", 3)
+    wait_for(app, trace_y("live", 2), [9, 8, 7])
+    expect(app.locator("#live .scatterlayer .trace")).to_have_count(3)
+
+    app.click("#deltrace")
+    wait_for(app, f"{gd('live')}.data.length", 2)
+    assert value(app, trace_y("live", 0)) == [1, 2, 3], "the first two traces stay"
+    expect(app.locator("#live .scatterlayer .trace")).to_have_count(2)
+
+
+def test_prepend_traces_defaults_to_every_trace_and_caps_from_the_far_end(app: Page):
+    app.click("#prepend")
+
+    wait_for(app, trace_y("live", 0), [0, 1, 2])
+    wait_for(app, trace_y("live", 1), [4, 3, 2])
+
+
+def test_update_applies_restyle_and_relayout_in_one_call(app: Page):
+    app.click("#combo")
+
+    wait_for(app, title("live"), "combo")
+    wait_for(app, marker_color("live", 0), "rgb(0, 128, 0)")
+    assert value(app, marker_color("live", 1)) is None, "indices scope the trace part"
+
+
 def test_updates_sent_before_the_first_draw_are_applied_right_after_it(app: Page):
     # The server sent these while the figure was still being computed.
     wait_for(app, trace_y("late", 0), [1, 9])

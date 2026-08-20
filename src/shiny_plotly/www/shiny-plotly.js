@@ -211,8 +211,8 @@
 
   function applyUpdate(gd, update) {
     var args = JSON.parse(update.args);
-    if (update.method === "extendTraces") {
-      // Plotly.extendTraces wants an array of indices and no maxPoints rather than null.
+    if (update.method === "extendTraces" || update.method === "prependTraces") {
+      // Both want an array of indices and no maxPoints rather than null.
       if (args[1] === null) args[1] = gd.data.map(function (_, i) { return i; });
       if (args[2] === null) args.length = 2;
     }

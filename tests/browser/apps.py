@@ -9,12 +9,16 @@ import plotly.graph_objects as go
 from shiny import App, Inputs, Outputs, Session, module, reactive, render, ui
 
 from shiny_plotly import (
+    add_traces,
+    delete_traces,
     extend_traces,
     output_plotly,
     plotly_js,
+    prepend_traces,
     relayout,
     render_plotly,
     restyle,
+    update,
 )
 
 CLICK_TO_INPUT = """
@@ -218,6 +222,10 @@ def make_live_app() -> App:
         ui.input_action_button("redraw", "redraw"),
         ui.input_action_button("nowhere", "nowhere"),
         ui.input_action_button("race_second", "race second"),
+        ui.input_action_button("addtrace", "add trace"),
+        ui.input_action_button("deltrace", "delete trace"),
+        ui.input_action_button("prepend", "prepend"),
+        ui.input_action_button("combo", "combo"),
         output_plotly("live", height="300px", width="500px"),
         output_plotly("late", height="200px", width="300px"),
         output_plotly("race", height="200px", width="300px"),
@@ -249,6 +257,31 @@ def make_live_app() -> App:
         @reactive.event(input.nowhere)
         async def _nowhere():
             await relayout("absent", {"title.text": "dropped"})
+
+        @reactive.effect
+        @reactive.event(input.addtrace)
+        async def _addtrace():
+            await add_traces("live", go.Scatter(y=[9, 8, 7]))
+
+        @reactive.effect
+        @reactive.event(input.deltrace)
+        async def _deltrace():
+            await delete_traces("live", 2)
+
+        @reactive.effect
+        @reactive.event(input.prepend)
+        async def _prepend():
+            await prepend_traces("live", {"y": [[0], [4]]}, max_points=3)
+
+        @reactive.effect
+        @reactive.event(input.combo)
+        async def _combo():
+            await update(
+                "live",
+                restyle={"marker.color": "rgb(0, 128, 0)"},
+                relayout={"title.text": "combo"},
+                indices=[0],
+            )
 
         @render_plotly
         async def late():

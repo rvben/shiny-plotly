@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The in-place update family is complete: `add_traces`, `delete_traces`, `prepend_traces` and `update` (a restyle and a relayout in one redraw) join `extend_traces`, `restyle` and `relayout`. Same contract as the first three: values through plotly's encoder, ids namespaced inside a module, updates held and applied in order while the output has no figure drawn.
+
 ## [0.3.0](https://github.com/rvben/shiny-plotly/compare/v0.2.0...v0.3.0) - 2026-08-20
 
 ### Added
