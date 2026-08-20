@@ -119,10 +119,13 @@ site-check: site
 
 # Probes the deployed demo after the Pages deploy. The public-URL rebuild that
 # actually ships can only be proven live (its wheel URL does not exist before the
-# deploy), so this is the first check that sees what visitors get.
+# deploy), so this is the first check that sees what visitors get, and it runs the
+# same two passes site-check does: the generic boot check, then the app-specific
+# one. Anything less here is a weaker proof of the more important artifact.
 PAGES_URL ?= https://rvben.github.io/shiny-plotly/
 site-verify:
 	uv run shinylive-check $(PAGES_URL)
+	uv run python tools/site_check.py --url $(PAGES_URL)
 
 # The version in pyproject.toml, the single source for the package version.
 version:

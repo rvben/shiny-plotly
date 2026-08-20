@@ -91,5 +91,5 @@ jobs:
       - name: Install Chromium
         run: make browsers PLAYWRIGHT_ARGS=--with-deps
 
-      - name: Boot the live site in Chromium
+      - name: Prove the live site boots and draws
         run: make site-verify
