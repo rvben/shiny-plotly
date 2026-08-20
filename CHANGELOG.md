@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/rvben/shiny-plotly/compare/v0.2.0...v0.3.0) - 2026-08-20
+
 ### Added
 
 - `@render_plotly(events=...)` forwards plotly events to Shiny inputs: any of `click`, `hover`, `selected` and `relayout` arrive as `input.<id>_<event>` (namespaced inside a module), carrying plotly's event data cut to what serializes (`points` with each point's scalar fields plus `customdata`, `bbox`, `pointNumbers`; `range` or `lassoPoints` for selections; relayout data as is). A click fires on every click; hover is debounced and becomes `None` when the pointer leaves; a deselect sets `selected` to `None`. Handlers attach once per graph div and survive re-renders. `max_event_points` (default 10 000) caps the points one event carries: above it the value arrives with `"points": None` and `point_count` set, its `range` or `lassoPoints` intact, because a point is about 100 bytes of JSON and a box over a dense trace would otherwise build a message of many megabytes, or one above uvicorn's default 16 MB websocket limit, which closes the session (`make bench-events` measures it; 200 000 selected points are 20.9 MB).
