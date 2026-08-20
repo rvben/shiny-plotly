@@ -1548,6 +1548,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-playwright" },
     { name = "ruff" },
+    { name = "shinylive-check" },
 ]
 
 [package.metadata]
@@ -1572,6 +1573,7 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-playwright", specifier = ">=0.9.0" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "shinylive-check", specifier = ">=0.1.0" },
 ]
 
 [[package]]
@@ -1586,6 +1588,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d3/19/c37d9047de9f3367b01d1d4fbdc8507c30e4af854796684ec024b242be30/shinychat-0.6.1.tar.gz", hash = "sha256:f57f39a1dd60332205c9ced44807b70d7874c0f369475b1395f3f9322002456c", size = 426453 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1b/a6/03d47e4257a9dce48f07a4c5934de02e300749c9a58f873294fc92652f8a/shinychat-0.6.1-py3-none-any.whl", hash = "sha256:dc4c742bfec391e933ceaa470c12c7c5f204ba6bb53f97cc5ba3567720b0e525", size = 439078 },
+]
+
+[[package]]
+name = "shinylive-check"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "playwright" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/21/a585d12bd835d39be0a920bcfa6c2f22a2f73961624ba5950690cb2d0322/shinylive_check-0.1.0.tar.gz", hash = "sha256:b8630b9e92fbab6dba0a62ad4060820b09bfc08b1ef53a73a2655f26db99ce61", size = 16250 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/2e/5d86f80788a162e567428695243a92958f25da7dc591a7ceff8f7fb6da2d/shinylive_check-0.1.0-py3-none-any.whl", hash = "sha256:0fc41cc965f5e2df2efdc2b02a74eaf5b57b616ad2fd25a0f78d75e95bfd095c", size = 15537 },
 ]
 
 [[package]]

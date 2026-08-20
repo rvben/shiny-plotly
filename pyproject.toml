@@ -58,6 +58,7 @@ dev = [
   "pytest-playwright>=0.9.0",
   "numpy>=1.26",
   "brotli>=1.1",
+  "shinylive-check>=0.1.0",
 ]
 
 # uv's default cache keys for a local build are the metadata files only, so a source-only

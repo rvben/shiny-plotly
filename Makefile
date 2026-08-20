@@ -1,6 +1,6 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
 	check-floor bench bench-events check version check-version release-notes publish clean \
-	site site-check release-patch release-minor release-major
+	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
 
@@ -89,7 +89,8 @@ bench-events:
 # Pinned: the demo build runs only in the Pages workflow, so a shinylive release
 # could break the deploy with no CI run ever having seen it. Bump deliberately.
 SHINYLIVE_VERSION := 0.8.11
-SITE_URL ?= http://127.0.0.1:8008
+SITE_PORT := 8008
+SITE_URL ?= http://127.0.0.1:$(SITE_PORT)
 
 # Exports the shinylive demo app with the wheel built from this checkout, so the
 # deployed demo tracks main, not PyPI. The committed examples/shinylive stays a
@@ -105,11 +106,23 @@ site: build
 	mkdir -p site/wheels
 	cp dist/*.whl site/wheels/
 
-# Serves the exported site and proves the demo renders in Chromium: pyodide boots,
-# the wheel installs, the stream ticks, the Explore tab draws. The Pages workflow
-# runs this before rebuilding with the public URL and deploying.
+# Proves the export in two passes. shinylive-check judges the boot generically
+# (console and page errors, output errors, a screenshot artifact on failure; it must
+# serve on SITE_PORT because the export references its wheel by that absolute URL).
+# tools/site_check.py then proves the app-specific behavior a boot check cannot:
+# the stream ticks and the Explore tab draws. The Pages workflow runs this before
+# rebuilding with the public URL and deploying.
 site-check: site
+	mkdir -p tmp
+	uv run shinylive-check site --port $(SITE_PORT) --screenshot tmp/boot-failure.png
 	uv run python tools/site_check.py --site site --url $(SITE_URL)
+
+# Probes the deployed demo after the Pages deploy. The public-URL rebuild that
+# actually ships can only be proven live (its wheel URL does not exist before the
+# deploy), so this is the first check that sees what visitors get.
+PAGES_URL ?= https://rvben.github.io/shiny-plotly/
+site-verify:
+	uv run shinylive-check $(PAGES_URL)
 
 # The version in pyproject.toml, the single source for the package version.
 version:

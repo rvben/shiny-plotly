@@ -1,8 +1,9 @@
 name: Pages
 
 # Builds the shinylive demo from the current checkout and deploys it to GitHub Pages,
-# after proving in a real browser that it renders (make site-check). Every step is a
-# make target, so the same build and the same proof run locally.
+# after proving in a real browser that it renders (make site-check), then probes the
+# live site once deployed (make site-verify). Every step is a make target, so the
+# same build and the same proofs run locally.
 
 on:
   push:
@@ -41,6 +42,14 @@ jobs:
       - name: Build the site and prove it renders
         run: make site-check
 
+      - name: Keep the evidence when the boot check fails
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: boot-failure
+          path: tmp/boot-failure.png
+          if-no-files-found: ignore
+
       - name: Rebuild against the public URL
         run: make site SITE_URL=https://rvben.github.io/shiny-plotly
 
@@ -59,3 +68,28 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # The build job checks the local-URL export; what ships is the public-URL rebuild,
+  # whose wheel URL only exists once deployed. Probe the live site so a deploy that
+  # boots broken fails the workflow instead of sitting green.
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync
+        run: make sync
+
+      - name: Install Chromium
+        run: make browsers PLAYWRIGHT_ARGS=--with-deps
+
+      - name: Boot the live site in Chromium
+        run: make site-verify
