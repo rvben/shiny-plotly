@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/rvben/shiny-plotly/compare/v0.3.0...v0.3.1) - 2026-08-20
+
 ### Added
 
 - `@render_plotly(theme="auto")`: the figure follows the page's color mode in the browser, with no server round-trip. `"auto"` pairs plotly's `"plotly"` and `"plotly_dark"` templates; a `(light, dark)` tuple picks others, each a registered name, a `Template` object or a template dict. Both templates travel with the figure with transparent backgrounds so the page shows through; the browser applies the mode's template before the first draw and switches it with `Plotly.relayout` when `data-bs-theme` (what `ui.input_dark_mode()` sets) or the OS `prefers-color-scheme` flips. Unknown template names raise at decoration time.

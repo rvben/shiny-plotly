@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shiny-plotly"
-version = "0.3.0"
+version = "0.3.1"
 description = "Render plotly figures in Shiny for Python with plain plotly.js, without the shinywidgets layer."
 readme = "README.md"
 requires-python = ">=3.10"
