@@ -103,6 +103,49 @@ def test_updates_sent_before_the_first_draw_are_applied_right_after_it(app: Page
     expect(app.locator("#late .gtitle")).to_have_text("queued")
 
 
+# Holds the race output's queued "first" relayout open for two seconds and logs the
+# application order in window.__raceLog. An update sent from the server during those two
+# seconds must still apply after "first": Shiny's client dispatches messages in order and
+# awaits the draw (queue drain included), on every supported shiny, so a later update can
+# never overtake a queued one. This pins that guarantee end to end; a client that started
+# pipelining messages past a pending draw would fail here, inside this two-second window.
+DELAY_QUEUED_RELAYOUT = """
+() => {
+  const real = window.Plotly.relayout;
+  window.__raceLog = [];
+  window.Plotly.relayout = function (gd, update) {
+    const args = arguments;
+    if (gd.id !== "race-plotly") return real.apply(window.Plotly, args);
+    const log = (res) => { window.__raceLog.push(update["title.text"]); return res; };
+    if (update["title.text"] === "first") {
+      window.__raceDrainStarted = true;
+      return new Promise((r) => setTimeout(r, 2000))
+        .then(() => real.apply(window.Plotly, args))
+        .then(log);
+    }
+    return real.apply(window.Plotly, args).then(log);
+  };
+}
+"""
+
+
+def test_an_update_arriving_while_the_pre_draw_queue_drains_is_applied_after_it(
+    page: Page, server_url: str, errors: list[str]
+):
+    """An update sent mid-drain must never overtake one queued before the first draw."""
+    page.goto(server_url + "/live/")
+    page.wait_for_function("() => !!window.Plotly")
+    page.evaluate(DELAY_QUEUED_RELAYOUT)
+    page.wait_for_function("() => window.__raceDrainStarted === true")
+
+    page.click("#race_second")
+
+    page.wait_for_function("() => (window.__raceLog || []).length === 2")
+    assert page.evaluate("() => window.__raceLog") == ["first", "second"]
+    assert value(page, title("race")) == "second"
+    assert errors == []
+
+
 def test_a_module_update_reaches_the_module_output_only(app: Page):
     app.click("#m-recolor")
 

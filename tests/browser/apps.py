@@ -217,8 +217,10 @@ def make_live_app() -> App:
         ui.input_action_button("retitle", "retitle"),
         ui.input_action_button("redraw", "redraw"),
         ui.input_action_button("nowhere", "nowhere"),
+        ui.input_action_button("race_second", "race second"),
         output_plotly("live", height="300px", width="500px"),
         output_plotly("late", height="200px", width="300px"),
+        output_plotly("race", height="200px", width="300px"),
         live_mod_ui("m"),
     )
 
@@ -257,6 +259,20 @@ def make_live_app() -> App:
         async def _before_the_first_draw():
             await extend_traces("late", {"y": [[9]]})
             await relayout("late", {"title.text": "queued"})
+
+        @render_plotly
+        async def race():
+            await asyncio.sleep(0.8)
+            return go.Figure(go.Scatter(y=[1]))
+
+        @reactive.effect
+        async def _race_before_the_first_draw():
+            await relayout("race", {"title.text": "first"})
+
+        @reactive.effect
+        @reactive.event(input.race_second)
+        async def _race_second():
+            await relayout("race", {"title.text": "second"})
 
         live_mod_server("m")
 
