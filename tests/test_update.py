@@ -121,9 +121,11 @@ def test_ids_are_namespaced_inside_a_module(messages):
     assert json.loads(msg["args"]) == [{"title.text": "from the module"}]
 
 
-def test_max_points_must_be_a_positive_integer():
+@pytest.mark.parametrize("bad", [0, -5, 2.5, "100", True])
+def test_max_points_must_be_a_positive_integer(bad):
+    """A bool too: plotly.js reads a JSON true as non-numeric and quietly drops the cap."""
     with pytest.raises(ValueError, match="max_points"):
-        run(extend_traces("fig", {"y": [[1]]}, max_points=0))
+        run(extend_traces("fig", {"y": [[1]]}, max_points=bad))
 
 
 def test_outside_a_session_it_fails_loudly():

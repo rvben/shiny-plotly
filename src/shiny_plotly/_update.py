@@ -63,7 +63,11 @@ async def extend_traces(
     The update is sent to the session's client; outside a session it fails. Use it
     from a reactive effect, for instance one driven by ``reactive.invalidate_later``.
     """
-    if max_points is not None and (not isinstance(max_points, int) or max_points < 1):
+    # bool is excluded by name: it is an int in Python but serializes to a JSON true,
+    # which plotly.js reads as non-numeric and quietly treats as no cap at all.
+    if max_points is not None and (
+        isinstance(max_points, bool) or not isinstance(max_points, int) or max_points < 1
+    ):
         raise ValueError(f"max_points must be a positive integer, got {max_points!r}")
     await _send(id, "extendTraces", [data, _indices(indices), max_points], session)
 
