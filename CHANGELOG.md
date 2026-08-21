@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `brotli` is a dependency, so a plain `uv add shiny-plotly` serves plotly.min.js in the smaller encoding (1.2 MB on the wire against 1.5 MB gzipped) instead of only where someone thought to ask for it. It carries the marker `sys_platform != 'emscripten'`: under pyodide the compressing route is never installed, so a shinylive export would have downloaded a 307 kB wasm wheel to compress nothing. An install that still ends up without brotli (a lock file older than this release, a platform with no wheel) falls back to gzip and logs the same one-off warning as before, now naming the fix.
 - README: the note on hidden outputs now names every container Shiny defers a chart in (an inactive `ui.navset_tab`, `ui.navset_card_tab`, `ui.navset_pill` or `ui.navset_hidden` panel, a closed `ui.accordion` section, and a false `ui.panel_conditional` from Shiny 1.6.1 on, which is where that last one changed), and says what it does not cover: a chart scrolled below the fold is drawn with the rest at load. A browser test holds every case, so a Shiny release that changes the behavior breaks the suite rather than the advice.
 
+### Fixed
+
+- A client that refuses an encoding with `Accept-Encoding: br;q=0.0` is no longer served it. RFC 9110 lets a qvalue of zero be written `q=0`, `q=0.0` or `q=0.000`, and only the first spelling was read as a refusal, so plotly.min.js could arrive in an encoding the client had said it would not take.
+
 ### Removed
 
 - The `brotli` extra, now that brotli is a plain dependency. An install that still names it (`shiny-plotly[brotli]`) gets the same package, plus a warning from pip or uv that the extra does not exist; drop the `[brotli]`.

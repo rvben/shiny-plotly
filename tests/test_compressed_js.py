@@ -7,6 +7,7 @@ import pathlib
 import threading
 import types
 
+import brotli
 import httpx2._decoders
 import plotly
 import plotly.graph_objects as go
@@ -116,9 +117,8 @@ def test_bundle_revalidation_answers_304_per_encoding(client):
     assert other.headers["etag"] != etag
 
 
-def test_brotli_is_preferred_when_the_module_is_installed(client, brotli_body_as_it_arrived):
-    brotli = pytest.importorskip("brotli")
-
+def test_brotli_is_the_encoding_a_browser_gets(client, brotli_body_as_it_arrived):
+    """brotli is a dependency, so this is what every install serves, not a lucky one."""
     resp = client.get(BUNDLE_URL, headers={"Accept-Encoding": "gzip, br"})
 
     assert resp.headers["content-encoding"] == "br"
@@ -173,7 +173,7 @@ def test_an_app_serves_the_compressed_bundle_before_any_session_exists(brotli_bo
         resp = client.get(BUNDLE_URL, headers={"Accept-Encoding": "gzip, br"})
 
     assert names[0] == _serve.ROUTE_NAME, "installed as the app was built"
-    assert resp.headers["content-encoding"] in {"br", "gzip"}
+    assert resp.headers["content-encoding"] == "br"
     assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert int(resp.headers["content-length"]) < len(RAW) // 2
 
@@ -296,6 +296,31 @@ def test_gzip_body_is_the_bundle():
     assert gzip.decompress(bundle.encodings["gzip"]) == RAW
 
 
+@pytest.mark.parametrize(
+    ("accept_encoding", "accepted"),
+    [
+        ("gzip, br", ["br", "gzip"]),
+        ("br", ["br"]),
+        ("gzip", ["gzip"]),
+        ("GZIP,  Br ", ["br", "gzip"]),
+        ("*", ["br", "gzip"]),
+        ("gzip;q=1.0, br;q=0.8", ["br", "gzip"]),
+        ("gzip, br;q=0", ["gzip"]),
+        ("gzip, br;q=0.0", ["gzip"]),
+        ("gzip, br;q=0.000", ["gzip"]),
+        ("*;q=0", []),
+        ("identity", []),
+        ("deflate, zstd", []),
+        ("br;q=none-of-that", ["br"]),
+        ("", []),
+        (None, []),
+    ],
+)
+def test_the_encodings_a_client_will_take_are_read_from_its_header(accept_encoding, accepted):
+    """Nothing yielded means the raw file: the route has no encoding the client accepts."""
+    assert list(_serve.accepted_encodings(accept_encoding)) == accepted
+
+
 def stub_bundle(tmp_path: pathlib.Path) -> _serve.CompressedBundle:
     """A bundle over a small stand-in file, so a test compresses bytes rather than 4.8 MB."""
     path = tmp_path / "plotly.min.js"
@@ -337,7 +362,6 @@ def test_brotli_ships_with_the_package_but_not_where_pyodide_runs_it():
 
 
 def test_nothing_is_announced_when_brotli_is_there(tmp_path, caplog):
-    pytest.importorskip("brotli")
     bundle = stub_bundle(tmp_path)
 
     with caplog.at_level(logging.WARNING, logger=_serve.logger.name):

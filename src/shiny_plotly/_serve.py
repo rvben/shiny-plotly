@@ -127,6 +127,24 @@ def bundle() -> CompressedBundle:
         return _bundle
 
 
+def refuses(params: str) -> bool:
+    """
+    Whether the parameters of one ``Accept-Encoding`` entry rule its encoding out.
+
+    RFC 9110 writes a refusal as a qvalue of zero, which is ``q=0`` but equally ``q=0.0``
+    and ``q=0.000``. Anything else leaves the encoding on offer, an unparsable qvalue
+    included: serving a client the encoding it asked for beats guessing at a malformed
+    header.
+    """
+    key, _, value = params.partition("=")
+    if key.strip().lower() != "q":
+        return False
+    try:
+        return float(value) == 0
+    except ValueError:
+        return False
+
+
 def accepted_encodings(accept_encoding: str | None) -> Iterator[str]:
     """Encodings the client accepts, in our order of preference."""
     if not accept_encoding:
@@ -134,7 +152,7 @@ def accepted_encodings(accept_encoding: str | None) -> Iterator[str]:
     offered: set[str] = set()
     for part in accept_encoding.split(","):
         token, _, params = part.partition(";")
-        if params.replace(" ", "").lower() == "q=0":
+        if refuses(params):
             continue
         offered.add(token.strip().lower())
     for encoding in ("br", "gzip"):
