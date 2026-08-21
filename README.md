@@ -381,29 +381,26 @@ A runnable version of the streaming pattern, with a pause switch and a window sl
 - `plotly_js()` is the `HTMLDependency` for plotly.js, served from the installed `plotly` wheel at `/lib/plotly-<version>/plotly.min.js`. Every `output_plotly` and every `fig_to_ui` fragment carries it, so it is optional; add it to the page UI when the first figure is inserted later (`ui.insert_ui`, a `@render.ui` that starts empty) and the bundle should load with the page.
 - `shiny_plotly_js()` is the helper's dependency. Every output and fragment carries it too.
 - `FIGUREWIDGET_MARGINS` is the `{"l": 16, "t": 32, "r": 16, "b": 16}` mapping.
-- `enable_compressed_plotly_js(app)` turns on compressed, immutable serving of plotly.js for a `shiny.App` before its first session (see below).
+- `enable_compressed_plotly_js(app)` adds compressed, immutable serving of plotly.js to a `shiny.App` explicitly. Every app built after `shiny_plotly` is imported already has it; this is the way in for one that was constructed before the import (see below).
 - `extend_traces`, `restyle` and `relayout` take an optional `session=` when called outside the current session's context.
 
 `render_plotly` needs `output_plotly`; it is an output binding, not a `render.ui`, so `ui.output_ui(id)` does not draw it.
 
 ### plotly.js on the wire
 
-Shiny serves HTML dependencies from a plain static mount: no compression, no `Cache-Control`. `plotly.min.js` is 4.9 MB, so once the first session of a process has rendered a figure, `shiny-plotly` adds a route in front of that mount for the bundle's exact path (`/lib/plotly-<version>/plotly.min.js`) that serves it pre-compressed (brotli when the `brotli` package is installed, gzip otherwise; 1.2 MB or 1.5 MB on the wire) with `Cache-Control: public, max-age=31536000, immutable`, `Vary: Accept-Encoding` and an `ETag` per encoding. The URL is keyed by the plotly version, so a browser fetches each version once. Compression runs once per process, in a background thread; until it has finished the route serves the raw file with the same headers.
+Shiny serves HTML dependencies from a plain static mount: no compression, no `Cache-Control`. `plotly.min.js` is 4.9 MB, so `shiny-plotly` adds a route in front of that mount for the bundle's exact path (`/lib/plotly-<version>/plotly.min.js`) that serves it pre-compressed (brotli when the `brotli` package is installed, gzip otherwise; 1.2 MB or 1.5 MB on the wire) with `Cache-Control: public, max-age=31536000, immutable`, `Vary: Accept-Encoding` and an `ETag` per encoding. The URL is keyed by the plotly version, so a browser fetches each version once. Compression runs once per process, in a background thread; until it has finished the route serves the raw file with the same headers.
 
 ```sh
 uv add "shiny-plotly[brotli]"  # optional: brotli instead of gzip
 ```
 
-Two things to know. The page load that starts the very first session of a process has already asked for the bundle before the route exists, so that one visitor gets the raw file from Shiny's mount; everyone after gets the compressed one. A Core app can close that gap by enabling the route as soon as the `App` exists:
+Without it the process logs one warning saying which encoding it is serving and what brotli would save, so a deployment can see it is shipping the larger bundle; `logging.getLogger("shiny_plotly").setLevel(logging.ERROR)` silences it.
 
-```python
-from shiny_plotly import enable_compressed_plotly_js
+The route asks nothing of the app. Importing `shiny_plotly` wraps `shiny.App.__init__`, so every app built afterwards has it, Core and Express alike, and the compression starts while the app is still being built rather than when someone first visits it. The timing is the whole point: the browser asks for plotly.js while the page is loading, well before the session that page opens exists, so a route that waited for a session would arrive one visitor too late, and that visitor would take 4.9 MB with no `Cache-Control` at all.
 
-app = App(app_ui, server)
-enable_compressed_plotly_js(app)
-```
+An app constructed before `shiny_plotly` is imported is the one case the constructor cannot reach; `enable_compressed_plotly_js(app)` adds the route to it, and returns `False` if it is already there.
 
-And if a reverse proxy in front of the app does its own compression and caching, or you want Shiny's static serving untouched for any reason, set `SHINY_PLOTLY_NO_COMPRESS=1` in the app's environment; `enable_compressed_plotly_js` then returns `False` and adds nothing.
+If a reverse proxy in front of the app does its own compression and caching, or you want Shiny's static serving untouched for any reason, set `SHINY_PLOTLY_NO_COMPRESS=1` in the app's environment: no route is added, and `enable_compressed_plotly_js` returns `False`.
 
 ### Shinylive
 

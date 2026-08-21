@@ -6,24 +6,27 @@ no ``Cache-Control``, so each visit moves the 4.8 MB bundle or at least revalida
 The bundle's URL is keyed by the plotly version (``/lib/plotly-<version>/plotly.min.js``),
 so it can be served with a year-long ``immutable`` cache and pre-compressed once.
 
-Shiny gives a package no hook into an ``App`` as it is built; the first hook is the
-session. So the first :class:`~shiny_plotly.render_plotly` (or :func:`~shiny_plotly.fig_to_ui`
-inside a session) of a process adds a route in front of Shiny's mount for the bundle's
-exact path, and a background thread compresses the bundle once per process. Until it
-has finished, the route serves the raw file, with the same cache headers. The page load
-that started the very first session of a process has already requested the bundle
-from Shiny's own mount by then; every request after it is served here.
+Importing ``shiny_plotly`` wraps ``shiny.App.__init__``, so every app built after it gets a
+route for the bundle's exact path in front of Shiny's mount, and a background thread starts
+compressing the bundle once per process. Both happen while the app is being built, before it
+can serve anything, so the first request of the process is already served here; until the
+compression has finished the route serves the raw file with the same cache headers. An app
+built before the import can still ask for the route with :func:`enable_compressed_plotly_js`,
+and each session enables it for its own app, so it is there either way.
 """
 
 from __future__ import annotations
 
+import functools
 import gzip
 import hashlib
+import logging
 import os
 import sys
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, Response
@@ -31,11 +34,24 @@ from starlette.routing import Route
 
 from ._deps import plotly_js
 
-__all__ = ("ROUTE_NAME", "CompressedBundle", "bundle", "enable_compressed_plotly_js")
+__all__ = (
+    "ROUTE_NAME",
+    "CompressedBundle",
+    "bundle",
+    "enable_compressed_plotly_js",
+    "enable_for_new_apps",
+)
 
 ROUTE_NAME = "shiny-plotly-bundle"
 CACHE_CONTROL = "public, max-age=31536000, immutable"
 MEDIA_TYPE = "text/javascript; charset=utf-8"
+
+logger = logging.getLogger(__name__)
+
+# How much smaller brotli q9 is than gzip -9 on plotly.min.js (1.22 MB against 1.46 MB on
+# plotly 6.9.0). Only used to size the warning below, which is raised precisely when brotli
+# is absent and the real figure cannot be measured.
+BROTLI_SAVING_PERCENT = 17
 
 try:
     import brotli
@@ -81,6 +97,17 @@ class CompressedBundle:
             if brotli is not None:
                 self.encodings["br"] = brotli.compress(raw, quality=9)
             self.encodings["gzip"] = gzip.compress(raw, compresslevel=9, mtime=0)
+            if brotli is None:
+                # Compression runs once per process, so this is said once. Without it a
+                # deployment has no way to notice it is serving the larger encoding: the
+                # bundle is compressed, cached and immutable either way, just bigger.
+                logger.warning(
+                    "shiny-plotly is serving plotly.min.js gzipped (%.2f MB); brotli would "
+                    "be about %d%% smaller. Install shiny-plotly[brotli] for it, or silence "
+                    "this with logging.getLogger('shiny_plotly').setLevel(logging.ERROR).",
+                    len(self.encodings["gzip"]) / 1e6,
+                    BROTLI_SAVING_PERCENT,
+                )
         finally:
             self._ready.set()
 
@@ -152,13 +179,9 @@ def enable_compressed_plotly_js(app: object) -> bool:
     """
     Serve plotly.min.js compressed and immutable from ``app``, starting now.
 
-    Every :class:`~shiny_plotly.render_plotly` does this for its app when its first
-    session starts, which is too late for the page load that started that session. A Core
-    app can call it as soon as the ``shiny.App`` exists, so the first visitor of the
-    process gets the compressed bundle too::
-
-        app = App(app_ui, server)
-        enable_compressed_plotly_js(app)
+    Importing ``shiny_plotly`` already does this for every ``shiny.App`` built afterwards,
+    so an app needs no call of its own. It stays the way in for an app that was constructed
+    before the import, and it is what each session calls for its own app.
 
     Returns True when the route was added, False when it was already there, ``app`` is
     not a Shiny app, or ``SHINY_PLOTLY_NO_COMPRESS`` is set in the environment (the escape
@@ -185,6 +208,43 @@ def enable_compressed_plotly_js(app: object) -> bool:
         )
         routes.insert(0, route)
     bundle()
+    return True
+
+
+# Marks the wrapper below, so a second import (or a module reload) wraps nothing twice.
+_WRAPPED = "_shiny_plotly_wrapped"
+
+
+def enable_for_new_apps() -> bool:
+    """
+    Serve the compressed bundle from every ``shiny.App`` built from now on.
+
+    Wraps ``shiny.App.__init__`` once, at import of this package, and enables the route on
+    each app it builds. Shiny offers a package no other hook into an app that early, and
+    early is the point: the browser asks for plotly.min.js while the page is loading, long
+    before the session that page opens exists, so a route installed by the first session is
+    installed one visitor too late. Express constructs the same ``App``, so it is covered too.
+
+    Returns True when the wrapper was installed, False when it was already there.
+    """
+    from shiny import App
+
+    original = App.__init__
+    if getattr(original, _WRAPPED, False):
+        return False
+
+    @functools.wraps(original)
+    def __init__(self: App, *args: Any, **kwargs: Any) -> None:
+        original(self, *args, **kwargs)
+        try:
+            enable_compressed_plotly_js(self)
+        except Exception:
+            # This app never asked for the route, so nothing here may keep it from being
+            # built; without it the bundle is served by Shiny's own mount, as before.
+            logger.warning("shiny-plotly could not serve plotly.min.js compressed", exc_info=True)
+
+    setattr(__init__, _WRAPPED, True)
+    App.__init__ = __init__
     return True
 
 

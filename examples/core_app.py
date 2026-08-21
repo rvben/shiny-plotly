@@ -9,7 +9,7 @@ from itertools import accumulate
 import plotly.graph_objects as go
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
 
-from shiny_plotly import enable_compressed_plotly_js, extend_traces, output_plotly, render_plotly
+from shiny_plotly import extend_traces, output_plotly, render_plotly
 
 app_ui = ui.page_sidebar(
     ui.sidebar(
@@ -99,6 +99,3 @@ def server(input: Inputs, output: Outputs, session: Session):
 
 
 app = App(app_ui, server)
-# Optional: serve plotly.js compressed from the very first request instead of from the
-# first session on (see README, "plotly.js on the wire").
-enable_compressed_plotly_js(app)
