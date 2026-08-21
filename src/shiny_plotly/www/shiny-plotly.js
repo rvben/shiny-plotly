@@ -61,21 +61,57 @@
   }
 
   // --- theme: follow the page's color mode ----------------------------------------------
-  // A value rendered with theme= carries both templates and no baked-in one; the mode's
-  // template goes into the figure before it is drawn, and a mode flip relayouts it into
-  // every themed graph on the page, with no server round-trip. The mode is data-bs-theme
-  // on <html> (what ui.input_dark_mode() sets) when present, the OS preference otherwise.
+  // A value rendered with theme= names two templates and carries no baked-in one; the
+  // mode's template goes into the figure before it is drawn, and a mode flip relayouts it
+  // into every themed graph on the page, with no server round-trip. The mode is the
+  // data-bs-theme of the graph's nearest ancestor that sets one (ui.input_dark_mode() sets
+  // it on <html>), the OS preference otherwise.
+  //
+  // The templates themselves arrive over their own message and are held here by key, so a
+  // page of charts sharing a theme is sent one copy of it rather than one per render. They
+  // are held as text and parsed per draw: plotly writes into the layout it is handed, so
+  // two graphs must never share one template object.
 
+  var templates = {}; // template JSON text, by key
   var themed = []; // graph divs carrying templates for both modes
   var modeWatcher = null;
+
+  function onTemplates(message) {
+    var sent = message.templates;
+    for (var key in sent) {
+      if (Object.prototype.hasOwnProperty.call(sent, key)) templates[key] = sent[key];
+    }
+  }
+
+  function themesFor(value) {
+    // Inline, for a render with no session to hold the cache (a stub session under Express
+    // before it connects, or a value produced outside a session at all).
+    if (value.themes) return JSON.parse(value.themes);
+    var keys = value.theme_keys;
+    if (!keys) return null;
+    if (templates[keys.light] === undefined || templates[keys.dark] === undefined) {
+      // Only reachable if the message carrying them was lost, which would also have closed
+      // the websocket. Drawing untemplated beats not drawing at all.
+      console.warn("shiny-plotly: theme templates for this output never arrived; drawing it with plotly's default template");
+      return null;
+    }
+    return {
+      light: JSON.parse(templates[keys.light]),
+      dark: JSON.parse(templates[keys.dark])
+    };
+  }
 
   function colorSchemeQuery() {
     return window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   }
 
-  function pageMode() {
-    var attr = document.documentElement.getAttribute("data-bs-theme");
-    if (attr === "dark" || attr === "light") return attr;
+  function pageMode(el) {
+    // Bootstrap honours data-bs-theme on any element, so a card or a sidebar can set a mode
+    // for part of a page; the nearest ancestor that names one wins, el itself included.
+    for (var node = el; node; node = node.parentElement) {
+      var attr = node.getAttribute && node.getAttribute("data-bs-theme");
+      if (attr === "dark" || attr === "light") return attr;
+    }
     var query = colorSchemeQuery();
     return query && query.matches ? "dark" : "light";
   }
@@ -83,7 +119,7 @@
   function retheme(gd) {
     // Not drawn yet: relayout would throw; the retheme chained after the draw catches up.
     if (!gd._shinyPlotlyThemes || !gd._shinyPlotlyDrawn) return Promise.resolve();
-    var mode = pageMode();
+    var mode = pageMode(gd);
     if (gd._shinyPlotlyMode === mode) return Promise.resolve();
     gd._shinyPlotlyMode = mode;
     return window.Plotly.relayout(gd, { template: gd._shinyPlotlyThemes[mode] });
@@ -98,9 +134,13 @@
     if (themed.indexOf(gd) === -1) themed.push(gd);
     if (modeWatcher !== null) return;
     modeWatcher = new MutationObserver(onModeChange);
+    // The whole tree, not just <html>: a container deeper in the page can set the mode for
+    // the graphs under it. Every themed graph re-reads its own nearest ancestor, and one
+    // whose mode did not change is left alone.
     modeWatcher.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-bs-theme"]
+      attributeFilter: ["data-bs-theme"],
+      subtree: true
     });
     var query = colorSchemeQuery();
     if (query && query.addEventListener) query.addEventListener("change", onModeChange);
@@ -264,27 +304,25 @@
     }
     var figure = JSON.parse(value.figure);
     figure.config = value.config;
-    var themes = value.themes ? JSON.parse(value.themes) : null;
-    if (themes) {
-      figure.layout = figure.layout || {};
-      figure.layout.template = themes[pageMode()];
-    }
+    var themes = themesFor(value);
     var gd = graphDiv(el);
-    if (gd) {
-      gd._shinyPlotlyThemes = themes;
-      if (themes) {
-        gd._shinyPlotlyMode = pageMode();
-        watchMode(gd);
-      }
-      // The retheme covers a mode that flipped while the draw was in flight.
-      return window.Plotly.react(gd, figure).then(function () { return retheme(gd); });
+    var redraw = gd !== null;
+    if (!redraw) {
+      clear(el); // an error message may be showing
+      gd = create(el, value);
     }
-    clear(el); // an error message may be showing
-    gd = create(el, value);
+    // The graph div exists before the mode is read: the mode comes from where the graph
+    // sits on the page, so there has to be a graph there to ask about.
     gd._shinyPlotlyThemes = themes;
     if (themes) {
-      gd._shinyPlotlyMode = pageMode();
+      gd._shinyPlotlyMode = pageMode(gd);
+      figure.layout = figure.layout || {};
+      figure.layout.template = themes[gd._shinyPlotlyMode];
       watchMode(gd);
+    }
+    if (redraw) {
+      // The retheme covers a mode that flipped while the draw was in flight.
+      return window.Plotly.react(gd, figure).then(function () { return retheme(gd); });
     }
     return window.Plotly.newPlot(gd, figure).then(function () {
       track(gd);
@@ -362,6 +400,7 @@
     };
     window.Shiny.outputBindings.register(binding, "shiny-plotly.output");
     window.Shiny.addCustomMessageHandler("shiny-plotly", onUpdate);
+    window.Shiny.addCustomMessageHandler("shiny-plotly-template", onTemplates);
     return true;
   }
 

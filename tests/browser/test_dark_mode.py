@@ -1,10 +1,13 @@
 """Dark mode: the README's re-render recipe and the theme option's client-side flip."""
 
+import json
 import re
 from collections.abc import Iterator
 
 import pytest
 from playwright.sync_api import Page, expect
+
+from shiny_plotly._render import TEMPLATE_MESSAGE
 
 pytestmark = pytest.mark.browser
 
@@ -14,6 +17,15 @@ AUTO = "document.getElementById('auto-plotly')"
 
 LIGHT_TEXT = "#2a3f5f"  # the plotly template's font color
 DARK_TEXT = "#f2f5fa"  # the plotly_dark template's font color
+
+T, V = "templates", "values"  # the two kinds of websocket frame a themed page depends on
+
+
+def kind(frame: str) -> str:
+    message = json.loads(frame)
+    if TEMPLATE_MESSAGE in (message.get("custom") or {}):
+        return T
+    return V if "values" in message else "other"
 
 
 @pytest.fixture
@@ -75,6 +87,76 @@ def test_a_re_render_keeps_the_mode_that_is_active_at_that_moment(app: Page):
     app.wait_for_function(f"() => {AUTO}.data[0].y.length === 4")
     assert full_layout(app, "font.color", AUTO) == DARK_TEXT
     assert full_layout(app, "paper_bgcolor", AUTO) == "rgba(0, 0, 0, 0)"
+
+
+def test_the_templates_travel_once_for_a_whole_page(page: Page, server_url: str):
+    """Two charts on one theme: one copy of it arrives, ahead of the values that name it."""
+    frames: list[str] = []
+
+    def watch(ws):
+        ws.on("framereceived", lambda payload: frames.append(payload))
+
+    page.on("websocket", watch)
+
+    page.goto(server_url + "/scoped/")
+    expect(page.locator(f"#page {SVG}").first).to_be_visible()
+    expect(page.locator(f"#panel {SVG}").first).to_be_visible()
+
+    kinds = [kind(frame) for frame in frames]
+    sent = [json.loads(f)["custom"][TEMPLATE_MESSAGE]["templates"] for f in frames if kind(f) == T]
+    assert kinds.count(T) == 1, "one message, for both charts"
+    assert len(sent[0]) == 2, "the light and the dark template, once each"
+    assert kinds.index(T) < kinds.index(V), "in the browser before it is asked to draw with them"
+    drawn = {}
+    for frame in frames:
+        if kind(frame) == V:
+            drawn.update(json.loads(frame)["values"])
+    assert drawn["page"]["theme_keys"] == drawn["panel"]["theme_keys"], "one theme, one key pair"
+    assert set(drawn["page"]["theme_keys"].values()) == set(sent[0])
+    assert drawn["page"]["themes"] is None, "the templates are named, not carried"
+    assert drawn["panel"]["themes"] is None
+
+
+def test_a_panel_can_set_the_color_mode_for_the_charts_inside_it(
+    page: Page, server_url: str, errors: list[str]
+):
+    """data-bs-theme is allowed on any element, so the nearest ancestor decides the mode."""
+    outside = "document.getElementById('page-plotly')"
+    inside = "document.getElementById('panel-plotly')"
+    page.goto(server_url + "/scoped/")
+    expect(page.locator(f"#page {SVG}").first).to_be_visible()
+    expect(page.locator(f"#panel {SVG}").first).to_be_visible()
+
+    assert page.evaluate(f"() => {outside}._fullLayout.font.color") == LIGHT_TEXT
+    assert page.evaluate(f"() => {inside}._fullLayout.font.color") == DARK_TEXT, "in the panel"
+
+    page.evaluate("document.getElementById('dark_panel').setAttribute('data-bs-theme', 'light')")
+
+    page.wait_for_function(f"() => {inside}._fullLayout.font.color === '{LIGHT_TEXT}'")
+    assert page.evaluate(f"() => {outside}._fullLayout.font.color") == LIGHT_TEXT, "left alone"
+
+    page.locator("#mode").locator("button").first.click()  # the page goes dark
+
+    page.wait_for_function(f"() => {outside}._fullLayout.font.color === '{DARK_TEXT}'")
+    assert page.evaluate(f"() => {inside}._fullLayout.font.color") == LIGHT_TEXT, "the panel wins"
+    assert errors == []
+
+
+def test_a_control_of_your_own_can_drive_the_mode(page: Page, server_url: str, errors: list[str]):
+    """The README's recipe: nothing but data-bs-theme is needed to switch every chart."""
+    own = "document.getElementById('own-plotly')"
+    page.goto(server_url + "/own-mode/")
+    expect(page.locator(f"#own {SVG}").first).to_be_visible()
+    assert page.evaluate(f"() => {own}._fullLayout.font.color") == LIGHT_TEXT
+
+    page.click("#night")
+
+    page.wait_for_function(f"() => {own}._fullLayout.font.color === '{DARK_TEXT}'")
+
+    page.click("#night")
+
+    page.wait_for_function(f"() => {own}._fullLayout.font.color === '{LIGHT_TEXT}'")
+    assert errors == []
 
 
 def test_a_custom_pair_follows_the_os_preference_when_the_page_has_no_mode_input(

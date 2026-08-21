@@ -375,3 +375,73 @@ def make_theme_app() -> App:
             return bars(3)
 
     return App(app_ui, server)
+
+
+def make_tabs_app() -> App:
+    """Charts in nav panels: Shiny does not render an output that is hidden."""
+    app_ui = ui.page_fluid(
+        ui.navset_tab(
+            ui.nav_panel("First", output_plotly("first", height="200px")),
+            ui.nav_panel("Second", output_plotly("second", height="200px")),
+            id="tab",
+        )
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def first():
+            return bars(2)
+
+        @render_plotly
+        def second():
+            return bars(3)
+
+    return App(app_ui, server)
+
+
+def make_own_mode_app() -> App:
+    """The README's recipe for driving the color mode from a control of your own."""
+    app_ui = ui.page_fluid(
+        ui.input_switch("night", "Night mode"),
+        ui.tags.script(
+            """
+            Shiny.addCustomMessageHandler("color-mode", function (message) {
+              document.documentElement.setAttribute("data-bs-theme", message.mode);
+            });
+            """
+        ),
+        ui.card(output_plotly("own")),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @reactive.effect
+        async def _apply_mode():
+            mode = "dark" if input.night() else "light"
+            await session.send_custom_message("color-mode", {"mode": mode})
+
+        @render_plotly(theme="auto")
+        def own():
+            # Independent of the switch: a template change a test sees was made in the browser.
+            return bars(3)
+
+    return App(app_ui, server)
+
+
+def make_scoped_theme_app() -> App:
+    """Two charts on one theme, one of them inside a panel that sets its own color mode."""
+    app_ui = ui.page_fluid(
+        ui.input_dark_mode(id="mode", mode="light"),
+        ui.card(output_plotly("page")),
+        ui.div(ui.card(output_plotly("panel")), id="dark_panel", data_bs_theme="dark"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme="auto")
+        def page():
+            return bars(3)
+
+        @render_plotly(theme="auto")
+        def panel():
+            return bars(3)
+
+    return App(app_ui, server)

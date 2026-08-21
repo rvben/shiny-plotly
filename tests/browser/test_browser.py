@@ -231,6 +231,19 @@ def test_none_empties_the_output_and_a_figure_brings_it_back(app: Page):
     expect(app.locator("#fig .bars .point")).to_have_count(3)
 
 
+def test_a_chart_in_a_hidden_tab_is_drawn_when_its_tab_is_opened(page: Page, server_url, errors):
+    """Shiny suspends a hidden output, so tabs spread the per-chart draw cost over time."""
+    page.goto(server_url + "/tabs/")
+    expect(page.locator(f"#first {SVG}").first).to_be_visible()
+
+    assert page.evaluate("() => document.getElementById('second-plotly')") is None
+    page.get_by_role("tab", name="Second").click()
+
+    expect(page.locator(f"#second {SVG}").first).to_be_visible()
+    expect(page.locator("#second .bars .point")).to_have_count(3)
+    assert errors == []
+
+
 def test_bundle_loads_on_demand_without_a_page_level_plotly_js(page: Page, server_url, errors):
     page.goto(server_url + "/lazy/")
 

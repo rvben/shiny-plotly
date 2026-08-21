@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A themed chart takes its color mode from the nearest ancestor that carries `data-bs-theme`, itself included, instead of from `<html>` alone. Bootstrap honors the attribute on any element, so `ui.div(..., data_bs_theme="dark")` around part of a page now themes the charts inside it while the rest of the page follows the page mode. The observer watches the whole subtree, so the attribute can be set on a container after the charts are drawn; that is all a control of your own needs to drive the mode, and the README carries the recipe.
+- README: what each chart on a page costs to draw, and that Shiny suspends outputs hidden in an inactive `ui.nav_panel`, so charts in tabs are drawn when their tab is first opened rather than on load.
+
+### Changed
+
+- The templates behind `@render_plotly(theme=...)` travel once per session instead of once per figure. A template is about 6.5 kB, and every chart on a page usually shares one pair, so the first themed value carries the pair and every value afterwards names it by content hash: a page of ten charts sends about 13 kB of templates instead of 135 kB. Two outputs on different themes each send their own pair, a module shares the cache with the page around it, and a reconnecting browser gets a new session and so a fresh copy. A render with no session to cache against (a value produced outside a session, or Express's stub session before it connects) still carries its templates inline.
+
 ## [0.3.2](https://github.com/rvben/shiny-plotly/compare/v0.3.1...v0.3.2) - 2026-08-20
 
 ### Added

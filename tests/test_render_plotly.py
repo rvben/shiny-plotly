@@ -1,4 +1,6 @@
 import json
+from collections.abc import Sequence
+from contextlib import contextmanager
 from typing import Any
 
 import plotly
@@ -9,6 +11,7 @@ from shiny.render.renderer import Renderer
 from starlette.testclient import TestClient
 
 from shiny_plotly import __version__, output_plotly, plotly_js, render_plotly
+from shiny_plotly._render import TEMPLATE_MESSAGE
 
 
 def bar() -> go.Figure:
@@ -259,28 +262,77 @@ def make_app() -> App:
 OUTPUT_IDS = ("sync_fig", "async_fig", "empty_fig", "parity_fig", "themed_fig")
 
 
-def first_flush(client: TestClient) -> dict:
-    """Connect like the browser does and return the first message carrying output values."""
+class Flush:
+    """Every message the browser received, up to and including the one with the values."""
+
+    def __init__(self, messages: list[dict]) -> None:
+        self.messages = messages
+
+    @property
+    def values(self) -> dict:
+        return self.messages[-1]["values"]
+
+    @property
+    def template_messages(self) -> list[dict[str, str]]:
+        """What each shiny-plotly-template message carried, in arrival order."""
+        return [
+            msg["custom"][TEMPLATE_MESSAGE]["templates"]
+            for msg in self.messages
+            if TEMPLATE_MESSAGE in (msg.get("custom") or {})
+        ]
+
+    @property
+    def templates(self) -> dict[str, str]:
+        """Every template that arrived, by key."""
+        arrived: dict[str, str] = {}
+        for templates in self.template_messages:
+            arrived.update(templates)
+        return arrived
+
+
+@contextmanager
+def connected(client: TestClient, output_ids: Sequence[str], data: dict | None = None):
+    """A websocket initialised the way the browser initialises one."""
     with client.websocket_connect("/websocket/") as ws:
         assert "config" in ws.receive_json()
         ws.send_json(
             {
                 "method": "init",
-                "data": {f".clientdata_output_{oid}_hidden": False for oid in OUTPUT_IDS},
+                "data": {
+                    **{f".clientdata_output_{oid}_hidden": False for oid in output_ids},
+                    **(data or {}),
+                },
             }
         )
-        for _ in range(50):
-            msg = ws.receive_json()
-            if "values" in msg and all(oid in msg["values"] for oid in OUTPUT_IDS):
-                assert msg.get("errors") in (None, {}), msg.get("errors")
-                return msg["values"]
-        pytest.fail("no output values flushed after init")
+        yield ws
+
+
+def read_flush(ws, output_ids: Sequence[str]) -> Flush:
+    """Read until every named output has a value, keeping what arrived on the way."""
+    seen: list[dict] = []
+    for _ in range(50):
+        msg = ws.receive_json()
+        seen.append(msg)
+        if "values" in msg and all(oid in msg["values"] for oid in output_ids):
+            assert msg.get("errors") in (None, {}), msg.get("errors")
+            return Flush(seen)
+    pytest.fail(f"no values for {', '.join(output_ids)} flushed after init")
+
+
+def connect_and_flush(client: TestClient, *output_ids: str, data: dict | None = None) -> Flush:
+    with connected(client, output_ids, data) as ws:
+        return read_flush(ws, output_ids)
 
 
 @pytest.fixture(scope="module")
-def values() -> dict:
+def flushed() -> Flush:
     with TestClient(make_app()) as client:
-        return first_flush(client)
+        return connect_and_flush(client, *OUTPUT_IDS)
+
+
+@pytest.fixture(scope="module")
+def values(flushed: Flush) -> dict:
+    return flushed.values
 
 
 def test_sync_figure_is_sent_as_figure_json_for_the_browser_helper_to_draw(values):
@@ -343,14 +395,16 @@ def test_renderer_options_reach_the_value(values):
     assert value["max_event_points"] is None
 
 
-def test_theme_auto_sends_both_templates_and_strips_the_figure_baked_in_one(values):
-    value = values["themed_fig"]
+def test_a_themed_value_names_its_templates_and_drops_the_figure_baked_in_one(flushed):
+    value = flushed.values["themed_fig"]
 
-    themes = json.loads(value["themes"])
-    assert set(themes) == {"light", "dark"}
-    assert themes["light"]["layout"]["font"]["color"] == "#2a3f5f", "the plotly template"
-    assert themes["dark"]["layout"]["font"]["color"] == "#f2f5fa", "the plotly_dark template"
-    for template in themes.values():
+    assert value["themes"] is None, "the templates travel over their own message"
+    keys = value["theme_keys"]
+    assert set(keys) == {"light", "dark"}
+    templates = {mode: json.loads(flushed.templates[key]) for mode, key in keys.items()}
+    assert templates["light"]["layout"]["font"]["color"] == "#2a3f5f", "the plotly template"
+    assert templates["dark"]["layout"]["font"]["color"] == "#f2f5fa", "the plotly_dark template"
+    for template in templates.values():
         assert template["layout"]["paper_bgcolor"] == "rgba(0,0,0,0)", "the page shows through"
         assert template["layout"]["plot_bgcolor"] == "rgba(0,0,0,0)"
     figure = json.loads(value["figure"])
@@ -358,11 +412,104 @@ def test_theme_auto_sends_both_templates_and_strips_the_figure_baked_in_one(valu
     assert figure["data"][0]["type"] == "bar", "the figure itself is untouched"
 
 
-def test_without_a_theme_the_value_has_no_templates_and_the_figure_keeps_its_own(values):
+def test_the_templates_arrive_before_the_value_that_names_them(flushed):
+    """Otherwise the first draw of the session has nothing to look its keys up in."""
+
+    def kind(msg: dict) -> str:
+        if TEMPLATE_MESSAGE in (msg.get("custom") or {}):
+            # Shiny runs a custom handler after the output values of the same message, so
+            # sharing one with them would be as late as arriving after them.
+            assert "values" not in msg, "the templates share a message with the values"
+            return "templates"
+        return "values" if "values" in msg else "other"
+
+    kinds = [kind(msg) for msg in flushed.messages]
+
+    assert "templates" in kinds, "no shiny-plotly-template message arrived"
+    assert kinds.index("templates") < kinds.index("values")
+
+
+def test_without_a_theme_the_value_names_no_templates_and_the_figure_keeps_its_own(values):
     value = values["sync_fig"]
 
     assert value["themes"] is None
+    assert value["theme_keys"] is None
     assert "template" in json.loads(value["figure"])["layout"]
+
+
+def themed_app() -> App:
+    """Two charts sharing one theme, one of them redrawn by an input."""
+    app_ui = ui.page_fluid(output_plotly("one"), output_plotly("two"))
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme="auto")
+        def one():
+            return bar().update_layout(title=f"n={input.n()}")
+
+        @render_plotly(theme="auto")
+        def two():
+            return bar()
+
+    return App(app_ui, server)
+
+
+def test_two_charts_on_one_theme_are_sent_one_copy_of_it():
+    with TestClient(themed_app()) as client:
+        flushed = connect_and_flush(client, "one", "two", data={"n": 1})
+
+    assert [sorted(sent) for sent in flushed.template_messages] == [sorted(flushed.templates)]
+    assert len(flushed.templates) == 2, "one light and one dark, for both charts"
+    assert flushed.values["one"]["theme_keys"] == flushed.values["two"]["theme_keys"]
+
+
+def test_a_re_render_names_the_templates_the_session_already_has():
+    with TestClient(themed_app()) as client, connected(client, ("one", "two"), {"n": 1}) as ws:
+        first = read_flush(ws, ("one", "two"))
+        ws.send_json({"method": "update", "data": {"n": 2}})
+        again = read_flush(ws, ("one",))
+
+    assert json.loads(again.values["one"]["figure"])["layout"]["title"]["text"] == "n=2"
+    assert again.template_messages == [], "already in the browser's cache"
+    assert again.values["one"]["theme_keys"] == first.values["one"]["theme_keys"]
+
+
+def test_a_second_session_is_sent_the_templates_again():
+    """A browser that reconnects has an empty cache, and it gets a new session."""
+    with TestClient(themed_app()) as client:
+        first = connect_and_flush(client, "one", "two", data={"n": 1})
+        second = connect_and_flush(client, "one", "two", data={"n": 1})
+
+    assert second.template_messages == first.template_messages != []
+    assert second.values["one"]["theme_keys"] == first.values["one"]["theme_keys"]
+
+
+def test_a_module_shares_the_session_cache_with_the_page_around_it():
+    """A module has its own session scope, but one browser holds one set of templates."""
+
+    @module.ui
+    def mod_ui():
+        return output_plotly("fig")
+
+    @module.server
+    def mod_server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme="auto")
+        def fig():
+            return bar()
+
+    app_ui = ui.page_fluid(output_plotly("page"), mod_ui("m"))
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme="auto")
+        def page():
+            return bar()
+
+        mod_server("m")
+
+    with TestClient(App(app_ui, server)) as client:
+        flushed = connect_and_flush(client, "page", "m-fig")
+
+    assert len(flushed.template_messages) == 1, "one message, for both scopes"
+    assert flushed.values["m-fig"]["theme_keys"] == flushed.values["page"]["theme_keys"]
 
 
 def test_a_custom_theme_pair_travels_resolved_with_transparent_backgrounds():
@@ -379,14 +526,38 @@ def test_a_custom_theme_pair_travels_resolved_with_transparent_backgrounds():
             return bar()
 
     with TestClient(App(app_ui, server)) as client:
-        value = flush_one(client, "fig")
+        flushed = connect_and_flush(client, "fig")
 
-    themes = json.loads(value["themes"])
+    keys = flushed.values["fig"]["theme_keys"]
+    themes = {mode: json.loads(flushed.templates[key]) for mode, key in keys.items()}
     assert themes["light"]["layout"]["font"]["color"] == "rgb(36,36,36)", "seaborn's text color"
     assert themes["dark"]["layout"]["font"]["color"] == "rgb(1, 2, 3)"
     for template in themes.values():
         assert template["layout"]["paper_bgcolor"] == "rgba(0,0,0,0)"
         assert template["layout"]["plot_bgcolor"] == "rgba(0,0,0,0)"
+
+
+def test_different_themes_get_different_keys_and_both_travel():
+    app_ui = ui.page_fluid(output_plotly("light_fig"), output_plotly("dark_fig"))
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(theme=("plotly", "plotly_dark"))
+        def light_fig():
+            return bar()
+
+        @render_plotly(theme=("seaborn", "plotly_dark"))
+        def dark_fig():
+            return bar()
+
+    with TestClient(App(app_ui, server)) as client:
+        flushed = connect_and_flush(client, "light_fig", "dark_fig")
+
+    light = flushed.values["light_fig"]["theme_keys"]
+    dark = flushed.values["dark_fig"]["theme_keys"]
+    assert light["light"] != dark["light"], "different templates, different keys"
+    assert light["dark"] == dark["dark"], "the same template, one key and one copy"
+    assert sorted(flushed.templates) == sorted({*light.values(), *dark.values()})
+    assert len(flushed.templates) == 3
 
 
 def test_a_theme_dict_template_is_not_mutated_by_the_transparency_fill():
@@ -400,14 +571,7 @@ def test_a_theme_dict_template_is_not_mutated_by_the_transparency_fill():
 
 
 def flush_one(client: TestClient, output_id: str) -> dict:
-    with client.websocket_connect("/websocket/") as ws:
-        ws.receive_json()
-        ws.send_json({"method": "init", "data": {f".clientdata_output_{output_id}_hidden": False}})
-        for _ in range(50):
-            msg = ws.receive_json()
-            if "values" in msg and output_id in msg["values"]:
-                return msg["values"][output_id]
-        pytest.fail("no output values flushed after init")
+    return connect_and_flush(client, output_id).values[output_id]
 
 
 def test_plotly_bundle_is_served_from_the_page_level_dependency():

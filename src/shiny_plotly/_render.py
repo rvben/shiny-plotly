@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import hashlib
+import weakref
+from collections.abc import Iterable, Mapping, MutableMapping
 from typing import Any
 
 import plotly.io as pio
@@ -8,6 +10,7 @@ from htmltools import Tag, css, tags
 from plotly.io.json import to_json_plotly
 from shiny.module import resolve_id
 from shiny.render.renderer import Jsonifiable, Renderer, ValueFn
+from shiny.session import Session, get_current_session
 from shiny.ui.fill import as_fill_item, as_fillable_container
 
 from ._deps import plotly_js, shiny_plotly_js
@@ -100,6 +103,27 @@ def _template_json(spec: TemplateSpec) -> dict[str, Any]:
     layout["plot_bgcolor"] = "rgba(0,0,0,0)"
     out["layout"] = layout
     return out
+
+
+# Name of the custom message carrying templates the session has not seen yet.
+TEMPLATE_MESSAGE = "shiny-plotly-template"
+
+# Keys of the templates each session has already been sent, by root session. A template is
+# about 6.5 kB and every chart on a page usually shares the same one, so it travels once
+# per session and the values afterwards carry only its key. The session holds the set, and
+# a browser that reconnects gets a new session, so the server can never believe the browser
+# has a template it does not; a weak key lets both go when the session ends.
+_sent_templates: MutableMapping[Session, set[str]] = weakref.WeakKeyDictionary()
+
+
+def template_body(spec: TemplateSpec) -> str:
+    """One template as the JSON it travels as, through plotly's own encoder."""
+    return str(to_json_plotly(_template_json(spec)))
+
+
+def template_key(template_json: str) -> str:
+    """Content address of one serialized template; equal templates share one key."""
+    return hashlib.sha256(template_json.encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 def normalize_max_event_points(value: int | None) -> int | None:
@@ -211,14 +235,17 @@ class render_plotly(Renderer[Figure]):
         round-trip. ``"auto"`` uses plotly's own pair: the ``"plotly"`` template in light
         mode and ``"plotly_dark"`` in dark. A ``(light, dark)`` pair picks the templates,
         each a registered name (``"seaborn"``), a plotly ``Template`` object or a template
-        dict. Both templates travel with the figure, with transparent ``paper_bgcolor``
-        and ``plot_bgcolor`` so the page shows through (a figure-level background still
-        wins); a template the figure baked in via ``layout.template`` is dropped. The
-        browser applies the mode's template before the first draw and switches it with
-        ``Plotly.relayout`` when the mode flips: it follows ``data-bs-theme`` on ``<html>``
-        (what ``ui.input_dark_mode()`` sets) when present, the OS ``prefers-color-scheme``
-        otherwise. Template names resolve when the decorator runs; an unknown name raises
-        right there. Default ``None``: the figure's own template, fixed.
+        dict. Both templates get transparent ``paper_bgcolor`` and ``plot_bgcolor`` so the
+        page shows through (a figure-level background still wins), and a template the
+        figure baked in via ``layout.template`` is dropped. Each template travels once per
+        session, so a page of charts sharing a theme sends one copy of it and every render
+        after that carries only its key. The browser applies the mode's template before the
+        first draw and switches it with ``Plotly.relayout`` when the mode flips: the mode is
+        the ``data-bs-theme`` of the output's nearest ancestor that sets one (what
+        ``ui.input_dark_mode()`` sets on ``<html>``, or a container that themes part of a
+        page), the OS ``prefers-color-scheme`` otherwise. Template names resolve when the
+        decorator runs; an unknown name raises right there. Default ``None``: the figure's
+        own template, fixed.
     """
 
     def __init__(
@@ -242,15 +269,21 @@ class render_plotly(Renderer[Figure]):
         self.events = normalize_events(events)
         self.max_event_points = normalize_max_event_points(max_event_points)
         self.theme = normalize_theme(theme)
-        if self.theme is None:
-            self._themes_json = None
-        else:
-            # Resolved and serialized once, here, so an unknown name fails at decoration
-            # time and a render costs nothing extra.
-            light, dark = self.theme
-            self._themes_json = to_json_plotly(
-                {"light": _template_json(light), "dark": _template_json(dark)}
-            )
+        # Resolved and serialized once, here, so an unknown name fails at decoration time
+        # and a render costs nothing extra.
+        self._theme_templates: dict[str, str] = {}
+        self._theme_keys: dict[str, Any] | None = None
+        self._themes_json: str | None = None
+        if self.theme is not None:
+            light, dark = (template_body(spec) for spec in self.theme)
+            self._theme_keys = {"light": template_key(light), "dark": template_key(dark)}
+            self._theme_templates = {
+                self._theme_keys["light"]: light,
+                self._theme_keys["dark"]: dark,
+            }
+            # The inline form, for a render with no session to cache against. Built from
+            # the same two strings, so both paths carry byte-identical templates.
+            self._themes_json = f'{{"light":{light},"dark":{dark}}}'
         # Registers _fn (sets output_id from its name) when used as a bare decorator.
         super().__init__(_fn)  # type: ignore[arg-type]
 
@@ -265,16 +298,45 @@ class render_plotly(Renderer[Figure]):
     def auto_output_ui(self) -> Tag:
         return output_plotly(self.output_id)
 
+    async def _cache_templates(self) -> dict[str, Any] | None:
+        """
+        The keys of this renderer's templates, once the session is known to hold them.
+
+        ``None`` when there is no session to cache against (a render outside a session, or
+        Express's stub session, which drops custom messages), and the templates then travel
+        inline with the value instead.
+        """
+        session = get_current_session()
+        if session is None or session.is_stub_session():
+            return None
+        sent = _sent_templates.setdefault(session.root_scope(), set())
+        new = {key: body for key, body in self._theme_templates.items() if key not in sent}
+        if new:
+            # Sent from inside the render, so it is its own websocket message ahead of the
+            # one carrying the values: the browser has the template before it is asked to
+            # draw with it. Batching it into the value message would invert that, since
+            # Shiny dispatches its custom handlers after its output values.
+            await session.send_custom_message(TEMPLATE_MESSAGE, {"templates": new})
+            # Recorded only once the send has gone through. A repeat send costs a message
+            # the browser overwrites with the same bytes, while a key recorded for a
+            # template that never arrived would leave the figure unthemed for the session.
+            sent.update(new)
+        return self._theme_keys
+
     async def transform(self, value: Figure) -> Jsonifiable:
         fig_dict = as_fig_dict(value)
         if self.figurewidget_margins:
             fill_in_margins(fig_dict)
-        if self._themes_json is not None:
+        themes_json, theme_keys = self._themes_json, None
+        if self._theme_templates:
             # The browser picks the mode's template; the one the figure baked in at
             # construction would only add dead weight and a flash of the wrong theme.
             layout = fig_dict.get("layout")
             if isinstance(layout, dict):
                 layout.pop("template", None)
+            theme_keys = await self._cache_templates()
+            if theme_keys is not None:
+                themes_json = None
         return {
             # Serialised by plotly, not Shiny: numpy and pandas values, datetimes and the
             # compact base64 array encoding only work through plotly's encoder.
@@ -285,5 +347,6 @@ class render_plotly(Renderer[Figure]):
             "post_script": self.post_script,
             "events": list(self.events),
             "max_event_points": self.max_event_points,
-            "themes": self._themes_json,
+            "themes": themes_json,
+            "theme_keys": theme_keys,
         }

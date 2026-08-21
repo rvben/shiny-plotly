@@ -175,6 +175,12 @@ The rules mirror `output_widget`:
 
 Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a small helper script (`shiny-plotly.js`, loaded with every output) that observes each graph's container with a `ResizeObserver`, so a card that changes size without a window resize, for example when a sibling output renders below it, or when a sidebar collapses, re-lays the graph out. The same helper purges a graph once it leaves the document, which releases the window listener and layout state plotly would otherwise keep.
 
+### Many charts on one page
+
+Drawing a plotly figure costs the browser a fixed amount of main-thread work per graph, tens of milliseconds for a small one on a current desktop, and the browser draws them one after another. On a dashboard of a dozen charts that per-chart work, not the bytes on the wire, is what the first second is spent on, and it is plotly's own cost: the same figure drawn from shinywidgets or from a static `to_html` export costs the same.
+
+The lever is drawing fewer charts at once. Shiny suspends an output that is hidden, so charts inside `ui.navset_tab` panels or `ui.accordion` sections are not rendered at all until their panel is shown, and each panel then pays only for its own charts. Charts that must all be visible are better served by fewer, denser figures (subplots in one graph div) than by many small ones.
+
 ### Dark mode
 
 Plotly does not follow Bootstrap's color mode by itself. `theme="auto"` makes the figure follow it in the browser, with no server round-trip:
@@ -198,7 +204,40 @@ def sales():
 def sales(): ...
 ```
 
-How it works: both templates travel with the figure, their `paper_bgcolor` and `plot_bgcolor` made transparent so the card's own background shows through in both modes (backgrounds set on the figure's layout still win). The browser applies the mode's template before the first draw and switches it with `Plotly.relayout` when the mode flips, so the switch is instant and works even while the server is busy. The mode is `data-bs-theme` on `<html>`, which is what `ui.input_dark_mode()` maintains, or the OS `prefers-color-scheme` on a page without that attribute. A template the figure baked in through `layout.template` is dropped for themed outputs; use `theme=None` (the default) where the figure's own template should stand.
+How it works: both templates get their `paper_bgcolor` and `plot_bgcolor` made transparent, so the card's own background shows through in both modes (backgrounds set on the figure's layout still win). The browser applies the mode's template before the first draw and switches it with `Plotly.relayout` when the mode flips, so the switch is instant and works even while the server is busy. A template the figure baked in through `layout.template` is dropped for themed outputs; use `theme=None` (the default) where the figure's own template should stand.
+
+A template is about 6.5 kB of JSON, so it is sent **once per session** rather than once per render: the first themed value of a session brings the templates over their own message, and every value after it names them by content hash. A dashboard of twelve charts on one theme therefore pays for the theme once, and a re-render of a small figure is not dominated by a template that has not changed. Two outputs whose templates are equal share the copy automatically; nothing has to be declared.
+
+The mode comes from `data-bs-theme` on the **nearest ancestor of the output that sets one**. Usually that is `<html>`, which is what `ui.input_dark_mode()` maintains, and a page without the attribute anywhere follows the OS `prefers-color-scheme`. Because the lookup is per output, a container can theme the charts inside it against the rest of the page:
+
+```python
+ui.div(
+    ui.card(output_plotly("preview")),  # always dark, whatever the page does
+    data_bs_theme="dark",
+)
+```
+
+**Driving the mode yourself.** The attribute is the whole contract, so anything that sets it switches the charts: no shiny-plotly API is involved. To drive it from your own control, write it and the graphs follow on the next frame:
+
+```python
+app_ui = ui.page_fluid(
+    ui.input_switch("night", "Night mode"),
+    ui.tags.script("""
+        Shiny.addCustomMessageHandler("color-mode", function (message) {
+          document.documentElement.setAttribute("data-bs-theme", message.mode);
+        });
+    """),
+    ui.card(output_plotly("sales")),
+)
+
+
+@reactive.effect
+async def _apply_mode():
+    mode = "dark" if input.night() else "light"
+    await session.send_custom_message("color-mode", {"mode": mode})
+```
+
+The same holds in reverse: a page that already themes itself (a CSS framework, a cookie read at startup, `ui.input_dark_mode()` in a nav bar) needs nothing added, and a chart rendered while the attribute is already `dark` comes up dark on its first draw rather than flashing light first.
 
 The manual alternative, picking the template on the server, still works and is the way to vary anything beyond the template per mode. Give the dark mode switch an id and read it in the render function; flipping the switch then re-renders the figure through `Plotly.react`:
 
