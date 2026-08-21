@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README: the note on hidden outputs now names every container Shiny defers a chart in (an inactive `ui.navset_tab`, `ui.navset_card_tab`, `ui.navset_pill` or `ui.navset_hidden` panel, a closed `ui.accordion` section, and a false `ui.panel_conditional` from Shiny 1.6.1 on, which is where that last one changed), and says what it does not cover: a chart scrolled below the fold is drawn with the rest at load. A browser test holds every case, so a Shiny release that changes the behavior breaks the suite rather than the advice.
+
 ## [0.3.3](https://github.com/rvben/shiny-plotly/compare/v0.3.2...v0.3.3) - 2026-08-21
 
 ### Added

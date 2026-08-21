@@ -179,7 +179,7 @@ Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a s
 
 Drawing a plotly figure costs the browser a fixed amount of main-thread work per graph, tens of milliseconds for a small one on a current desktop, and the browser draws them one after another. On a dashboard of a dozen charts that per-chart work, not the bytes on the wire, is what the first second is spent on, and it is plotly's own cost: the same figure drawn from shinywidgets or from a static `to_html` export costs the same.
 
-The lever is drawing fewer charts at once. Shiny suspends an output that is hidden, so charts inside `ui.navset_tab` panels or `ui.accordion` sections are not rendered at all until their panel is shown, and each panel then pays only for its own charts. Charts that must all be visible are better served by fewer, denser figures (subplots in one graph div) than by many small ones.
+The lever is drawing fewer charts at once, and Shiny pulls it for you: an output the browser reports as hidden is suspended, so its figure is not rendered at all until it is shown. That covers every container that hides one, whether an inactive panel of `ui.navset_tab`, `ui.navset_card_tab`, `ui.navset_pill` or `ui.navset_hidden`, a closed `ui.accordion` section, or a `ui.panel_conditional` whose condition is false (that last one from Shiny 1.6.1 on; older Shiny drew it at load); each panel then pays only for its own charts, and pays when it is opened. Scrolling is not hiding, though: a chart 3000px down the page is visible as far as the browser is concerned, and is drawn with the rest at load. Charts that must all be visible at once are better served by fewer, denser figures (subplots in one graph div) than by many small ones.
 
 ### Dark mode
 
