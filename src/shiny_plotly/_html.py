@@ -103,9 +103,15 @@ def fig_to_ui(
 
 
 def as_fig_dict(fig: Figure) -> dict[str, Any]:
-    # Figure.to_dict() does no validation (the figure was validated when built), and a
-    # dict is passed through as the caller's JSON; pio.to_html gets validate=False so it
-    # never reconstructs a Figure from it.
+    """
+    The figure as a plain dict carrying a ``layout`` dict, whichever way it was given.
+
+    Everything downstream reaches into ``layout`` (to fill in margins, to drop a baked-in
+    template), so it is made a dict here rather than guarded against at each of them.
+    """
+    # Figure.to_dict() does no validation (the figure was validated when built), and always
+    # carries a layout; a dict is passed through as the caller's JSON, so pio.to_html gets
+    # validate=False and never reconstructs a Figure from it.
     if isinstance(fig, BaseFigure):
         return fig.to_dict()
     if isinstance(fig, dict):
@@ -116,5 +122,5 @@ def as_fig_dict(fig: Figure) -> dict[str, Any]:
 
 
 def fill_in_margins(fig_dict: dict[str, Any]) -> None:
-    layout = fig_dict.setdefault("layout", {})
+    layout = fig_dict["layout"]
     layout["margin"] = {**FIGUREWIDGET_MARGINS, **(layout.get("margin") or {})}

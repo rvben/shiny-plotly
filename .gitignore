@@ -6,5 +6,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.coverage
 tmp/
 site/

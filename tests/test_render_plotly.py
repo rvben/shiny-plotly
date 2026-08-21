@@ -1,17 +1,21 @@
 import json
 from collections.abc import Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 import plotly
 import plotly.graph_objects as go
 import pytest
 from shiny import App, Inputs, Outputs, Session, module, ui
+from shiny.express._stub_session import ExpressStubSession
 from shiny.render.renderer import Renderer
+from shiny.session import session_context
 from starlette.testclient import TestClient
 
 from shiny_plotly import __version__, output_plotly, plotly_js, render_plotly
 from shiny_plotly._render import TEMPLATE_MESSAGE
+
+from helpers import run
 
 
 def bar() -> go.Figure:
@@ -558,6 +562,43 @@ def test_different_themes_get_different_keys_and_both_travel():
     assert light["dark"] == dark["dark"], "the same template, one key and one copy"
     assert sorted(flushed.templates) == sorted({*light.values(), *dark.values()})
     assert len(flushed.templates) == 3
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        pytest.param(None, id="no session at all"),
+        pytest.param(ExpressStubSession(), id="express before the browser connects"),
+    ],
+)
+def test_a_value_with_no_session_to_cache_against_carries_its_templates_inline(session):
+    """Naming keys would name them in a cache nothing is keeping, so the pair travels whole."""
+
+    @render_plotly(theme="auto")
+    def sales():
+        return bar()
+
+    with session_context(session):
+        value = cast(dict[str, Any], run(sales.transform(bar())))
+
+    assert value["theme_keys"] is None, "there is nothing to look a key up in"
+    themes = json.loads(value["themes"])
+    assert themes["light"]["layout"]["font"]["color"] == "#2a3f5f", "the plotly template"
+    assert themes["dark"]["layout"]["font"]["color"] == "#f2f5fa", "the plotly_dark template"
+    assert "template" not in json.loads(value["figure"])["layout"]
+
+
+def test_a_themed_figure_given_as_a_dict_with_no_layout_renders():
+    """Dropping the baked-in template reaches into layout; a dict need not have brought one."""
+
+    @render_plotly(theme="auto")
+    def sales():
+        return {"data": [{"type": "bar", "y": [1, 2]}]}
+
+    value = cast(dict[str, Any], run(sales.transform({"data": [{"type": "bar", "y": [1, 2]}]})))
+
+    assert json.loads(value["figure"])["layout"] == {}
+    assert json.loads(value["themes"])["light"]["layout"]["font"]["color"] == "#2a3f5f"
 
 
 def test_a_theme_dict_template_is_not_mutated_by_the_transparency_fill():

@@ -27,9 +27,14 @@ fmt:
 typecheck:
 	uv run pyright
 
-# Unit tests and the in-process Shiny end-to-end tests; no browser needed.
+# Unit tests and the in-process Shiny end-to-end tests; no browser needed. Every line and
+# branch of the package is reached without a browser, and the gate keeps it that way: code
+# a browser alone would cover is code the fast suite cannot hold. A line that genuinely
+# cannot run (an import guard for a dependency that is always there) carries a
+# `# pragma: no cover` naming why.
 test:
-	uv run pytest -q -m "not browser"
+	uv run pytest -q -m "not browser" --cov=shiny_plotly --cov-branch \
+		--cov-report=term-missing --cov-fail-under=100
 
 # Drives the package in headless Chromium: sizing, resize tracking, purge on re-render,
 # post_script event wiring. Needs `make browsers` once.
@@ -44,13 +49,15 @@ build:
 
 # Installs the freshly built wheel into a throwaway venv and runs the non-browser suite
 # against it, so what ships (the JS helper and py.typed included) is what was tested, not
-# the editable checkout.
+# the editable checkout. numpy is a test dependency here rather than the package's: without
+# it nine tests of the numpy paths skipped, quietly making this run cover less than `test`.
+# -rs names every skip that is left, so none of them passes for something nobody looked at.
 check-wheel: build
 	rm -rf .wheel-venv
 	uv venv --quiet .wheel-venv
-	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2
+	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2 numpy
 	.wheel-venv/bin/python -c "import shiny_plotly; print('shiny_plotly', shiny_plotly.__version__)"
-	cd tests && ../.wheel-venv/bin/python -m pytest -q -p no:cacheprovider --ignore=browser \
+	cd tests && ../.wheel-venv/bin/python -m pytest -q -rs -p no:cacheprovider --ignore=browser \
 		--rootdir=.. -c ../pyproject.toml .
 	rm -rf .wheel-venv
 
@@ -69,7 +76,7 @@ check-floor:
 	.floor-venv/bin/python -c "import plotly, shiny, htmltools; \
 		print('plotly', plotly.__version__, 'shiny', shiny.__version__, 'htmltools', htmltools.__version__)"
 	.floor-venv/bin/python -m playwright install $(PLAYWRIGHT_ARGS) chromium
-	cd tests && ../.floor-venv/bin/python -m pytest -q -p no:cacheprovider \
+	cd tests && ../.floor-venv/bin/python -m pytest -q -rs -p no:cacheprovider \
 		--rootdir=.. -c ../pyproject.toml .
 	rm -rf .floor-venv
 

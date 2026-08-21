@@ -1,10 +1,6 @@
 """extend_traces, restyle and relayout: in-place updates sent to a drawn figure."""
 
-import asyncio
 import json
-from collections.abc import Coroutine
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, TypeVar
 
 import plotly.graph_objects as go
 import pytest
@@ -23,17 +19,7 @@ from shiny_plotly import (
     update,
 )
 
-T = TypeVar("T")
-
-
-def run(coro: Coroutine[Any, Any, T]) -> T:
-    """
-    The coroutine on its own loop in a worker thread. The main thread cannot run one
-    while the browser tests' session-wide playwright fixture is alive (its sync API
-    keeps a loop running there), and nothing awaited here needs that loop anyway.
-    """
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+from helpers import run
 
 
 def bar() -> go.Figure:

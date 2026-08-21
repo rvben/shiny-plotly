@@ -331,9 +331,7 @@ class render_plotly(Renderer[Figure]):
         if self._theme_templates:
             # The browser picks the mode's template; the one the figure baked in at
             # construction would only add dead weight and a flash of the wrong theme.
-            layout = fig_dict.get("layout")
-            if isinstance(layout, dict):
-                layout.pop("template", None)
+            fig_dict["layout"].pop("template", None)
             theme_keys = await self._cache_templates()
             if theme_keys is not None:
                 themes_json = None

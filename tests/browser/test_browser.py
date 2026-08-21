@@ -361,10 +361,12 @@ def test_the_bundle_arrives_compressed_and_immutable_for_the_next_visitor(
     finally:
         visitor.close()
 
-    assert headers["content-encoding"] in ("br", "gzip")
+    # Chromium offers br over plain http on localhost too, and brotli is a dependency, so
+    # this is the encoding a real visitor gets rather than one of two possibilities.
+    assert headers["content-encoding"] == "br"
     assert headers["cache-control"] == "public, max-age=31536000, immutable"
     assert fresh["decoded"] == _serve.bundle().size, "the whole bundle, whichever plotly"
-    assert fresh["encoded"] < fresh["decoded"] // 3, "brotli or gzip on the wire"
+    assert fresh["encoded"] < fresh["decoded"] // 3, "brotli on the wire"
     assert fresh["transfer"] > fresh["encoded"], "headers plus the compressed body"
     # Chromium would keep a freshly installed bundle for a while on heuristics alone; the
     # header above is what makes this hold for a year, for every install age.

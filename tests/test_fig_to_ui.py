@@ -125,6 +125,16 @@ def test_accepts_a_prebuilt_figure_dict_without_revalidating_it():
     assert call.data[0]["not_a_real_attr"] == 1, "a dict goes to JSON as-is; validation would raise"
 
 
+def test_a_figure_dict_with_no_layout_is_given_one():
+    """Margins and themes reach into layout without checking first; this is why they can."""
+    fig_dict = {"data": [{"type": "bar", "y": [1]}]}
+
+    call = parse_newplot(render_html(fig_to_ui(fig_dict, div_id="p", figurewidget_margins=True)))
+
+    assert call.layout["margin"] == FIGUREWIDGET_MARGINS
+    assert fig_dict == {"data": [{"type": "bar", "y": [1]}]}, "the caller's dict is untouched"
+
+
 def test_rejects_values_that_are_not_figures():
     with pytest.raises(TypeError, match=r"go\.Figure"):
         fig_to_ui("not a figure")  # type: ignore[arg-type]
