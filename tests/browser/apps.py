@@ -377,14 +377,57 @@ def make_theme_app() -> App:
     return App(app_ui, server)
 
 
-def make_tabs_app() -> App:
-    """Charts in nav panels: Shiny does not render an output that is hidden."""
+def make_hidden_app() -> App:
+    """One chart per way a page can hide one, plus one that is merely below the fold.
+
+    Shiny does not render an output the browser reports as hidden, which is what the
+    README tells readers to lean on. Every container that hides a chart is here, each
+    chart with its own bar count so a reveal proves which one arrived, and the chart
+    3000px down the page is the control: hiding is not scrolling, so that one is drawn
+    at load and its presence proves a test can see a chart when there is one.
+    """
     app_ui = ui.page_fluid(
+        ui.tags.script(
+            # shiny:idle fires once nothing is left to render, so a test can read "not
+            # drawn" without a sleep and know it did not simply look too early.
+            "$(document).on('shiny:idle', function () {"
+            " window.shinyIdleCount = (window.shinyIdleCount || 0) + 1; });"
+        ),
         ui.navset_tab(
-            ui.nav_panel("First", output_plotly("first", height="200px")),
-            ui.nav_panel("Second", output_plotly("second", height="200px")),
+            ui.nav_panel("First", output_plotly("first", height="150px")),
+            ui.nav_panel("Second", output_plotly("second", height="150px")),
             id="tab",
-        )
+        ),
+        ui.navset_card_tab(
+            ui.nav_panel("Card one", "nothing here"),
+            ui.nav_panel("Card two", output_plotly("card", height="150px")),
+            id="card_tab",
+        ),
+        ui.navset_pill(
+            ui.nav_panel("Pill one", "nothing here"),
+            ui.nav_panel("Pill two", output_plotly("pill", height="150px")),
+            id="pill",
+        ),
+        ui.accordion(
+            ui.accordion_panel("Open section", "nothing here", value="open"),
+            ui.accordion_panel("Folded section", output_plotly("folded", height="150px")),
+            id="accordion",
+            open="open",
+            multiple=True,
+        ),
+        ui.input_switch("show_conditional", "Show the conditional chart", value=False),
+        ui.panel_conditional(
+            "input.show_conditional", output_plotly("conditional", height="150px")
+        ),
+        ui.input_switch("show_swapped", "Swap the hidden navset to its chart", value=False),
+        ui.navset_hidden(
+            ui.nav_panel(None, "nothing here", value="nothing"),
+            ui.nav_panel(None, output_plotly("swapped", height="150px"), value="chart"),
+            id="swap",
+            selected="nothing",
+        ),
+        ui.div(style="height: 3000px"),
+        output_plotly("below", height="150px"),
     )
 
     def server(input: Inputs, output: Outputs, session: Session):
@@ -395,6 +438,36 @@ def make_tabs_app() -> App:
         @render_plotly
         def second():
             return bars(3)
+
+        @render_plotly
+        def card():
+            return bars(4)
+
+        @render_plotly
+        def pill():
+            return bars(5)
+
+        @render_plotly
+        def folded():
+            return bars(6)
+
+        @render_plotly
+        def conditional():
+            return bars(7)
+
+        @render_plotly
+        def swapped():
+            return bars(8)
+
+        @render_plotly
+        def below():
+            return bars(9)
+
+        @reactive.effect
+        def _swap_hidden_navset():
+            # shiny 1.0, the dependency floor, calls this update_navs; 1.7 renamed it.
+            update = getattr(ui, "update_navset", None) or ui.update_navs
+            update("swap", selected="chart" if input.show_swapped() else "nothing")
 
     return App(app_ui, server)
 

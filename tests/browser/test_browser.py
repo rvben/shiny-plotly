@@ -1,10 +1,13 @@
 """Real-browser checks: what the package promises only shows in a rendering engine."""
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 
 import pytest
+from packaging.version import Version
 from playwright.sync_api import Page, expect
+from shiny import __version__ as SHINY_VERSION
 
 pytestmark = pytest.mark.browser
 
@@ -231,16 +234,88 @@ def test_none_empties_the_output_and_a_figure_brings_it_back(app: Page):
     expect(app.locator("#fig .bars .point")).to_have_count(3)
 
 
-def test_a_chart_in_a_hidden_tab_is_drawn_when_its_tab_is_opened(page: Page, server_url, errors):
-    """Shiny suspends a hidden output, so tabs spread the per-chart draw cost over time."""
-    page.goto(server_url + "/tabs/")
-    expect(page.locator(f"#first {SVG}").first).to_be_visible()
+@dataclass(frozen=True)
+class HiddenChart:
+    """A chart the /hidden page keeps out of sight, and what brings it into view."""
 
-    assert page.evaluate("() => document.getElementById('second-plotly')") is None
-    page.get_by_role("tab", name="Second").click()
+    container: str
+    output_id: str
+    points: int
+    reveal: Callable[[Page], None]
 
-    expect(page.locator(f"#second {SVG}").first).to_be_visible()
-    expect(page.locator("#second .bars .point")).to_have_count(3)
+
+# Shiny suspends an output inside a false ``ui.panel_conditional`` from 1.6.1 on; 1.6.0 and
+# older, the declared floor among them, draw that chart at load. Measured by installing each
+# release and running this case; every other container here defers at every supported version.
+CONDITIONAL_IS_DEFERRED = Version(SHINY_VERSION) >= Version("1.6.1")
+
+HIDDEN_CHARTS = [
+    HiddenChart(
+        "navset_tab", "second", 3, lambda page: page.get_by_role("tab", name="Second").click()
+    ),
+    HiddenChart(
+        "navset_card_tab", "card", 4, lambda page: page.get_by_role("tab", name="Card two").click()
+    ),
+    HiddenChart(
+        "navset_pill", "pill", 5, lambda page: page.get_by_role("tab", name="Pill two").click()
+    ),
+    HiddenChart(
+        "accordion",
+        "folded",
+        6,
+        lambda page: page.get_by_role("button", name="Folded section").click(),
+    ),
+    pytest.param(
+        HiddenChart(
+            "panel_conditional", "conditional", 7, lambda page: page.click("#show_conditional")
+        ),
+        marks=pytest.mark.skipif(
+            not CONDITIONAL_IS_DEFERRED,
+            reason=f"shiny {SHINY_VERSION} draws this one at load; 1.6.1 is where it defers",
+        ),
+    ),
+    HiddenChart("navset_hidden", "swapped", 8, lambda page: page.click("#show_swapped")),
+]
+
+# The open tab panel, and the chart 3000px down the page, which the browser calls visible even
+# though nobody can see it yet. Both are controls: they prove a snapshot of the page sees a
+# chart when there is one, so an id missing from it is an output Shiny suspended rather than a
+# test that looked too early.
+DRAWN_AT_LOAD = sorted(
+    ["first-plotly", "below-plotly"] + ([] if CONDITIONAL_IS_DEFERRED else ["conditional-plotly"])
+)
+
+
+def open_the_hidden_page(page: Page, server_url: str) -> None:
+    """Load /hidden and wait until every output that is going to render has rendered."""
+    page.goto(server_url + "/hidden/")
+    expect(page.locator(f"#below {SVG}").first).to_be_visible()
+    page.wait_for_function("() => window.shinyIdleCount >= 1")
+
+
+def test_only_the_charts_the_visitor_can_see_are_drawn_at_load(page: Page, server_url, errors):
+    """Shiny suspends a hidden output, the lever the README hands a crowded dashboard."""
+    open_the_hidden_page(page, server_url)
+
+    drawn = page.eval_on_selector_all(".plotly-graph-div", "els => els.map(e => e.id).sort()")
+
+    assert drawn == DRAWN_AT_LOAD
+    assert errors == []
+
+
+@pytest.mark.parametrize("case", HIDDEN_CHARTS, ids=lambda case: case.container)
+def test_a_hidden_chart_is_drawn_when_its_container_shows_it(
+    case: HiddenChart, page: Page, server_url, errors
+):
+    """Every container that hides a chart defers it, and pays for it when it is opened."""
+    open_the_hidden_page(page, server_url)
+    assert page.evaluate(f"() => document.getElementById('{case.output_id}-plotly')") is None
+
+    case.reveal(page)
+
+    expect(page.locator(f"#{case.output_id} {SVG}").first).to_be_visible()
+    # Its own bar count, so the reveal drew this chart rather than any of the others.
+    expect(page.locator(f"#{case.output_id} .bars .point")).to_have_count(case.points)
     assert errors == []
 
 

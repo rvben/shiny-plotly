@@ -17,11 +17,11 @@ from .apps import (
     make_app,
     make_dark_app,
     make_events_app,
+    make_hidden_app,
     make_lazy_app,
     make_live_app,
     make_own_mode_app,
     make_scoped_theme_app,
-    make_tabs_app,
     make_theme_app,
 )
 
@@ -47,7 +47,7 @@ def server_url() -> Iterator[str]:
             Mount("/theme", app=make_theme_app()),
             Mount("/scoped", app=make_scoped_theme_app()),
             Mount("/own-mode", app=make_own_mode_app()),
-            Mount("/tabs", app=make_tabs_app()),
+            Mount("/hidden", app=make_hidden_app()),
             Mount("/stream", app=load_example("streaming_app.py")),
             Mount("/demo", app=load_example("shinylive/app.py")),
             Mount("/", app=make_app()),
