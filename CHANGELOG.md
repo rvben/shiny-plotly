@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/rvben/shiny-plotly/compare/v0.3.3...v0.4.0) - 2026-08-21
+
 ### Changed
 
 - `brotli` is a dependency, so a plain `uv add shiny-plotly` serves plotly.min.js in the smaller encoding (1.2 MB on the wire against 1.5 MB gzipped) instead of only where someone thought to ask for it. It carries the marker `sys_platform != 'emscripten'`: under pyodide the compressing route is never installed, so a shinylive export would have downloaded a 307 kB wasm wheel to compress nothing. An install that still ends up without brotli (a lock file older than this release, a platform with no wheel) falls back to gzip and logs the same one-off warning as before, now naming the fix.
