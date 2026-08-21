@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3](https://github.com/rvben/shiny-plotly/compare/v0.3.2...v0.3.3) - 2026-08-21
+
 ### Added
 
 - A themed chart takes its color mode from the nearest ancestor that carries `data-bs-theme`, itself included, instead of from `<html>` alone. Bootstrap honors the attribute on any element, so `ui.div(..., data_bs_theme="dark")` around part of a page now themes the charts inside it while the rest of the page follows the page mode. The observer watches the whole subtree, so the attribute can be set on a container after the charts are drawn; that is all a control of your own needs to drive the mode, and the README carries the recipe.
