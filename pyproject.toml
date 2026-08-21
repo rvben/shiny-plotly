@@ -33,11 +33,11 @@ dependencies = [
   "shiny>=1.0",
   "plotly>=5.5",
   "htmltools>=0.5.2",
+  # plotly.min.js is served brotli-compressed, about 17% smaller than gzip. Under pyodide
+  # there is nothing to compress (the bundle comes from the shinylive export) and the route
+  # is skipped, so the marker keeps a 307 kB wasm wheel out of every exported app.
+  "brotli>=1.1; sys_platform != 'emscripten'",
 ]
-
-[project.optional-dependencies]
-# plotly.min.js is served brotli-compressed (about 15% smaller than gzip) when present.
-brotli = ["brotli>=1.1"]
 
 [project.urls]
 Homepage   = "https://github.com/rvben/shiny-plotly"
@@ -57,7 +57,6 @@ dev = [
   "httpx2>=2.12.0",
   "pytest-playwright>=0.9.0",
   "numpy>=1.26",
-  "brotli>=1.1",
   "shinylive-check>=0.1.0",
 ]
 

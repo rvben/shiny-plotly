@@ -1523,14 +1523,10 @@ name = "shiny-plotly"
 version = "0.3.3"
 source = { editable = "." }
 dependencies = [
+    { name = "brotli", marker = "sys_platform != 'emscripten'" },
     { name = "htmltools" },
     { name = "plotly" },
     { name = "shiny" },
-]
-
-[package.optional-dependencies]
-brotli = [
-    { name = "brotli" },
 ]
 
 [package.dev-dependencies]
@@ -1539,7 +1535,6 @@ bench = [
     { name = "shinywidgets" },
 ]
 dev = [
-    { name = "brotli" },
     { name = "httpx2" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -1553,12 +1548,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "brotli", marker = "extra == 'brotli'", specifier = ">=1.1" },
+    { name = "brotli", marker = "sys_platform != 'emscripten'", specifier = ">=1.1" },
     { name = "htmltools", specifier = ">=0.5.2" },
     { name = "plotly", specifier = ">=5.5" },
     { name = "shiny", specifier = ">=1.0" },
 ]
-provides-extras = ["brotli"]
 
 [package.metadata.requires-dev]
 bench = [
@@ -1566,7 +1560,6 @@ bench = [
     { name = "shinywidgets", specifier = ">=0.8.1" },
 ]
 dev = [
-    { name = "brotli", specifier = ">=1.1" },
     { name = "httpx2", specifier = ">=2.12.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pyright", specifier = ">=1.1.380" },

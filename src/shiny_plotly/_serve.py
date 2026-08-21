@@ -55,7 +55,7 @@ BROTLI_SAVING_PERCENT = 17
 
 try:
     import brotli
-except ImportError:  # pragma: no cover - optional extra
+except ImportError:  # pragma: no cover - a dependency, absent only where it was left out
     brotli = None
 
 
@@ -103,8 +103,8 @@ class CompressedBundle:
                 # bundle is compressed, cached and immutable either way, just bigger.
                 logger.warning(
                     "shiny-plotly is serving plotly.min.js gzipped (%.2f MB); brotli would "
-                    "be about %d%% smaller. Install shiny-plotly[brotli] for it, or silence "
-                    "this with logging.getLogger('shiny_plotly').setLevel(logging.ERROR).",
+                    "be about %d%% smaller. Install brotli for it, or silence this with "
+                    "logging.getLogger('shiny_plotly').setLevel(logging.ERROR).",
                     len(self.encodings["gzip"]) / 1e6,
                     BROTLI_SAVING_PERCENT,
                 )

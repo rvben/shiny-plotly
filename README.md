@@ -388,13 +388,9 @@ A runnable version of the streaming pattern, with a pause switch and a window sl
 
 ### plotly.js on the wire
 
-Shiny serves HTML dependencies from a plain static mount: no compression, no `Cache-Control`. `plotly.min.js` is 4.9 MB, so `shiny-plotly` adds a route in front of that mount for the bundle's exact path (`/lib/plotly-<version>/plotly.min.js`) that serves it pre-compressed (brotli when the `brotli` package is installed, gzip otherwise; 1.2 MB or 1.5 MB on the wire) with `Cache-Control: public, max-age=31536000, immutable`, `Vary: Accept-Encoding` and an `ETag` per encoding. The URL is keyed by the plotly version, so a browser fetches each version once. Compression runs once per process, in a background thread; until it has finished the route serves the raw file with the same headers.
+Shiny serves HTML dependencies from a plain static mount: no compression, no `Cache-Control`. `plotly.min.js` is 4.9 MB, so `shiny-plotly` adds a route in front of that mount for the bundle's exact path (`/lib/plotly-<version>/plotly.min.js`) that serves it pre-compressed (brotli, 1.2 MB on the wire, or gzip at 1.5 MB where brotli is not installed) with `Cache-Control: public, max-age=31536000, immutable`, `Vary: Accept-Encoding` and an `ETag` per encoding. The URL is keyed by the plotly version, so a browser fetches each version once. Compression runs once per process, in a background thread; until it has finished the route serves the raw file with the same headers.
 
-```sh
-uv add "shiny-plotly[brotli]"  # optional: brotli instead of gzip
-```
-
-Without it the process logs one warning saying which encoding it is serving and what brotli would save, so a deployment can see it is shipping the larger bundle; `logging.getLogger("shiny_plotly").setLevel(logging.ERROR)` silences it.
+`brotli` is a dependency, so a plain `uv add shiny-plotly` serves the smaller encoding. It is skipped under pyodide, where there is nothing to compress: a shinylive export carries its own assets and the route is not installed at all. An install that ends up without it (a lock file that predates the dependency, a platform with no wheel) falls back to gzip and logs one warning saying which encoding it is serving and what brotli would save, so a deployment can see it is shipping the larger bundle; `logging.getLogger("shiny_plotly").setLevel(logging.ERROR)` silences it.
 
 The route asks nothing of the app. Importing `shiny_plotly` wraps `shiny.App.__init__`, so every app built afterwards has it, Core and Express alike, and the compression starts while the app is still being built rather than when someone first visits it. The timing is the whole point: the browser asks for plotly.js while the page is loading, well before the session that page opens exists, so a route that waited for a session would arrive one visitor too late, and that visitor would take 4.9 MB with no `Cache-Control` at all.
 

@@ -575,8 +575,13 @@ def flush_one(client: TestClient, output_id: str) -> dict:
 
 
 def test_plotly_bundle_is_served_from_the_page_level_dependency():
+    # The route this reaches is about the path, not the encoding, so ask for the file as it is
+    # on disk; what it serves compressed has tests of its own in test_compressed_js.py.
     with TestClient(make_app()) as client:
-        resp = client.get(f"/lib/plotly-{plotly.__version__}/plotly.min.js")
+        resp = client.get(
+            f"/lib/plotly-{plotly.__version__}/plotly.min.js",
+            headers={"Accept-Encoding": "identity"},
+        )
 
     assert resp.status_code == 200
     assert b"Plotly" in resp.content[:200_000]
@@ -592,8 +597,9 @@ def test_bundle_and_helper_are_served_from_the_output_tag_without_a_page_level_c
             return bar()
 
     with TestClient(App(app_ui, server)) as client:
-        bundle = client.get(f"/lib/plotly-{plotly.__version__}/plotly.min.js")
-        helper = client.get(f"/lib/shiny-plotly-{__version__}/shiny-plotly.js")
+        raw = {"Accept-Encoding": "identity"}
+        bundle = client.get(f"/lib/plotly-{plotly.__version__}/plotly.min.js", headers=raw)
+        helper = client.get(f"/lib/shiny-plotly-{__version__}/shiny-plotly.js", headers=raw)
 
     assert bundle.status_code == 200
     assert len(bundle.content) > 1_000_000

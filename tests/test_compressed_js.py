@@ -1,14 +1,17 @@
 """Compressed, immutable serving of plotly.min.js, from every app's first request on."""
 
 import gzip
+import importlib.metadata
 import logging
 import pathlib
 import threading
 import types
 
+import httpx2._decoders
 import plotly
 import plotly.graph_objects as go
 import pytest
+from packaging.requirements import Requirement
 from shiny import App, Inputs, Outputs, Session, render, ui
 from shiny.express import wrap_express_app
 from starlette.testclient import TestClient
@@ -66,6 +69,19 @@ def client():
         yield client
 
 
+@pytest.fixture
+def brotli_body_as_it_arrived(monkeypatch):
+    """Hand a ``br`` response over undecoded, so the test reads the bytes off the wire.
+
+    httpx decodes ``br`` by calling the installed brotli with ``output_buffer_limit``, which
+    brotli only accepts from 1.2 on, so against brotli 1.1 (the floor this package declares)
+    the call raises before a test sees the response. Dropping the decoder is what httpx itself
+    does when brotli is missing, and what is under test is the encoding shiny-plotly serves,
+    not a client's ability to decode it; a browser doing that is covered by tests/browser.
+    """
+    monkeypatch.delitem(httpx2._decoders.SUPPORTED_DECODERS, "br", raising=False)
+
+
 def test_bundle_is_served_gzipped_and_immutable(client):
     resp = client.get(BUNDLE_URL, headers={"Accept-Encoding": "gzip"})
 
@@ -100,13 +116,14 @@ def test_bundle_revalidation_answers_304_per_encoding(client):
     assert other.headers["etag"] != etag
 
 
-def test_brotli_is_preferred_when_the_module_is_installed(client):
-    pytest.importorskip("brotli")
+def test_brotli_is_preferred_when_the_module_is_installed(client, brotli_body_as_it_arrived):
+    brotli = pytest.importorskip("brotli")
 
     resp = client.get(BUNDLE_URL, headers={"Accept-Encoding": "gzip, br"})
 
     assert resp.headers["content-encoding"] == "br"
-    assert resp.content == RAW
+    assert len(resp.content) < len(RAW) // 3
+    assert brotli.decompress(resp.content) == RAW, "brotli of the exact bundle"
 
 
 def test_head_requests_carry_the_same_headers(client):
@@ -146,7 +163,7 @@ def test_fig_to_ui_inside_render_ui_enables_it_too():
     assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
-def test_an_app_serves_the_compressed_bundle_before_any_session_exists():
+def test_an_app_serves_the_compressed_bundle_before_any_session_exists(brotli_body_as_it_arrived):
     """No call, no websocket: the browser asks for the bundle while the page is still loading."""
     app = make_app()
     names = [getattr(r, "name", None) for r in app.starlette_app.router.routes]
@@ -300,9 +317,23 @@ def test_serving_the_larger_encoding_is_announced_when_brotli_is_missing(
     assert set(bundle.encodings) == {"gzip"}
     assert len(caplog.records) == 1, "said once per process, not once per request"
     message = caplog.records[0].getMessage()
-    assert "shiny-plotly[brotli]" in message, "the fix is named"
+    assert "Install brotli" in message, "the fix is named"
     assert f"{_serve.BROTLI_SAVING_PERCENT}%" in message
     assert "logging.getLogger('shiny_plotly')" in message, "and so is the way to silence it"
+
+
+def test_brotli_ships_with_the_package_but_not_where_pyodide_runs_it():
+    """A deployment gets the smaller encoding without asking; a shinylive export does not.
+
+    Under pyodide the route is never installed (the bundle comes from the export), so an
+    unmarked dependency would put a 307 kB wasm wheel into every exported app for nothing.
+    """
+    requirements = [Requirement(text) for text in importlib.metadata.requires("shiny-plotly") or []]
+    brotli_requirement = next(r for r in requirements if r.name == "brotli")
+
+    assert brotli_requirement.marker is not None, "unmarked, so pyodide pays for it"
+    assert brotli_requirement.marker.evaluate({"sys_platform": "linux"})
+    assert not brotli_requirement.marker.evaluate({"sys_platform": "emscripten"})
 
 
 def test_nothing_is_announced_when_brotli_is_there(tmp_path, caplog):
