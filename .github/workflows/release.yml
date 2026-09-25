@@ -1,10 +1,12 @@
 name: Release
 
-# Triggered by a version tag (`vership bump patch` pushes one). Re-runs the CI
-# targets on the tagged commit, builds the distribution once, publishes it to
-# PyPI through trusted publishing (no token: the repository must be registered
-# as a trusted publisher for the `shiny-plotly` project on PyPI, environment
-# `pypi`), and creates the GitHub release with the CHANGELOG.md section as body.
+# Triggered by a version tag (`vership bump patch` pushes one). Runs the whole CI
+# workflow on the tagged commit (every Python, and the dependency floor on the
+# oldest one), so nothing publishes that CI would fail. Then builds the
+# distribution once, publishes it to PyPI through trusted publishing (no token:
+# the repository must be registered as a trusted publisher for the
+# `shiny-plotly` project on PyPI, environment `pypi`), and creates the GitHub
+# release with the CHANGELOG.md section as body.
 
 on:
   push:
@@ -14,10 +16,14 @@ permissions:
   contents: read
 
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   verify:
     name: Verify the tagged commit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v7
@@ -34,18 +40,9 @@ jobs:
       - name: CHANGELOG.md has a section for this version
         run: make release-notes VERSION="${GITHUB_REF_NAME#v}"
 
-      - run: make lock-check
-      - run: make sync
-      - run: make lint
-      - run: make typecheck
-      - run: make test
-      - run: make browsers PLAYWRIGHT_ARGS=--with-deps
-      - run: make test-browser
-      - run: make check-floor
-
   build:
     name: Build
-    needs: verify
+    needs: [ci, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

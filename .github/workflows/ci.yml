@@ -1,13 +1,14 @@
 name: CI
 
 # Every step is a make target, so the same checks run locally with `make check`.
-# The release workflow runs the identical targets before it publishes.
+# The release workflow calls this workflow on the tagged commit before it publishes.
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
