@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/rvben/shiny-plotly/compare/v0.4.0...v0.4.1) - 2026-09-25
+
 ### Fixed
 
 - A click, hover or selection on a heatmap (or any trace that addresses a point by row and column) now carries the point's `pointNumber` as `[row, column]` and its `customdata`. Both were dropped: the pair is not a scalar, so it was left out, and looking customdata up by it came back empty. Customdata is now the value plotly itself puts on the point, for every trace type.
