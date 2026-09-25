@@ -154,7 +154,8 @@
   // --- events to inputs ---------------------------------------------------------------
   // What plotly hands an event handler holds the full trace and axis objects, circular and
   // large; what travels is each point's scalar fields plus the few objects worth having
-  // (bbox, pointNumbers, customdata), the same cut Dash makes. Typed arrays, which is how
+  // (bbox, pointNumbers, customdata, and a pointNumber that is a [row, column] pair on a
+  // 2-D trace such as a heatmap), the same cut Dash makes. Typed arrays, which is how
   // plotly holds decoded bdata, become plain arrays so they serialize as lists.
 
   function plain(value) {
@@ -171,10 +172,10 @@
     }
     if (point.bbox) out.bbox = point.bbox;
     if (point.pointNumbers) out.pointNumbers = point.pointNumbers;
-    var trace = gd._fullData && gd._fullData[point.curveNumber];
-    if (trace && trace.customdata != null && point.pointNumber !== undefined) {
-      out.customdata = plain(trace.customdata[point.pointNumber]);
-    }
+    if (Array.isArray(point.pointNumber)) out.pointNumber = point.pointNumber.slice();
+    // Plotly puts the point's customdata on the point itself, looked up the way the trace
+    // type addresses its points; a trace without customdata leaves it undefined.
+    if (point.customdata !== undefined) out.customdata = plain(point.customdata);
     return out;
   }
 

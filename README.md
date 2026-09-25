@@ -284,7 +284,7 @@ What arrives is plotly's own event data, cut to what serializes, the same way Da
 | `legendclick` | `{"curve_number": 1, "expanded_index": 1, "name": "beta", "visible": True}` for the trace whose legend item was clicked, `visible` as it stood before the click's toggle (`True` or `"legendonly"`); trace types whose legend items are labels (pie, funnelarea) add `label`; fires on every click, and the default toggle still happens |
 | `legenddoubleclick` | same value as `legendclick`; the default isolate-this-trace behavior still happens |
 
-Each point carries plotly's scalar fields for that trace type (`curveNumber`, `pointNumber`, `pointIndex`, `x`, `y`, `z`, `text`, `label`, `value`, `lat`, `lon`, ...) plus `customdata` (as a plain list, also when it was a numpy array), `bbox` and `pointNumbers` when present. `input.<id>_<event>()` raises a silent exception until the event has fired once, so check `is_set()` when the output should show something before that.
+Each point carries plotly's scalar fields for that trace type (`curveNumber`, `pointNumber`, `pointIndex`, `x`, `y`, `z`, `text`, `label`, `value`, `lat`, `lon`, ...) plus `customdata` (as a plain list, also when it was a numpy array), `bbox` and `pointNumbers` when present. On a 2-D trace such as a heatmap `pointNumber` is the cell's `[row, column]`. `input.<id>_<event>()` raises a silent exception until the event has fired once, so check `is_set()` when the output should show something before that.
 
 #### Dense traces
 

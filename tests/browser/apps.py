@@ -128,6 +128,7 @@ def make_events_app() -> App:
         output_plotly("sel", height="300px", width="500px"),
         output_plotly("dense", height="300px", width="500px"),
         output_plotly("leg", height="300px", width="500px"),
+        output_plotly("heat", height="300px", width="500px"),
         ui.output_text("click_out"),
         ui.output_text("click_count"),
         ui.output_text("hover_out"),
@@ -137,6 +138,7 @@ def make_events_app() -> App:
         ui.output_text("legendclick_out"),
         ui.output_text("legenddbl_out"),
         ui.output_text("dbl_out"),
+        ui.output_text("heat_out"),
         events_mod_ui("m"),
     )
 
@@ -164,6 +166,14 @@ def make_events_app() -> App:
         def leg():
             return go.Figure(
                 [go.Scatter(y=[1, 2], name="alpha"), go.Scatter(y=[2, 1], name="beta")]
+            )
+
+        @render_plotly(events="click")
+        def heat():
+            # A cell is addressed by [row, column], and its customdata is itself a list:
+            # 3-D numpy customdata, which travels as bdata.
+            return go.Figure(
+                go.Heatmap(z=[[1, 2], [3, 4]], customdata=np.arange(8).reshape(2, 2, 2))
             )
 
         @reactive.effect
@@ -208,6 +218,10 @@ def make_events_app() -> App:
         @render.text
         def dbl_out():
             return as_text(input.leg_doubleclick()) if input.leg_doubleclick.is_set() else "-"
+
+        @render.text
+        def heat_out():
+            return as_text(input.heat_click()) if input.heat_click.is_set() else "-"
 
         events_mod_server("m")
 

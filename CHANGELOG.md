@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A click, hover or selection on a heatmap (or any trace that addresses a point by row and column) now carries the point's `pointNumber` as `[row, column]` and its `customdata`. Both were dropped: the pair is not a scalar, so it was left out, and looking customdata up by it came back empty. Customdata is now the value plotly itself puts on the point, for every trace type.
 - The in-place updates take a numpy integer for `indices`, where it failed with `TypeError: 'numpy.int64' object is not iterable`, and `extend_traces` and `prepend_traces` take one for `max_points`, as `render_plotly` does for `max_event_points`, where both were refused as not a positive integer. Indices that are not integers (a float, a string, a `bool`) are refused with a `ValueError` naming the argument instead of being sent to the browser.
 - A client that refuses an encoding by name in `Accept-Encoding` is no longer sent it because the header also has a `*`: `gzip;q=0, *` asked for anything but gzip and got gzip. A refusal is also read wherever `q` stands among the entry's parameters.
 - `If-None-Match` for plotly.min.js now matches a weak validator (`W/"..."`, as a proxy may send it) and `*`, returning 304 instead of the whole bundle again.

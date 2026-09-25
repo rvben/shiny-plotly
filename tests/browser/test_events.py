@@ -17,6 +17,7 @@ def app(page: Page, server_url: str, errors: list[str]) -> Iterator[Page]:
     expect(page.locator(f"#fig {SVG}").first).to_be_visible()
     expect(page.locator(f"#sel {SVG}").first).to_be_visible()
     expect(page.locator(f"#leg {SVG}").first).to_be_visible()
+    expect(page.locator(f"#heat {SVG}").first).to_be_visible()
     expect(page.locator(f"#m-fig {SVG}").first).to_be_visible()
     expect(page.locator("#click_out")).to_have_text("-")
     yield page
@@ -49,6 +50,24 @@ def test_click_hands_the_point_to_the_input_with_plain_customdata(app: Page):
     assert point["y"] == 2
     assert point["customdata"] == [2, 3], "2-D bdata came back as a list, not a typed array"
     assert not {"data", "fullData", "xaxis", "yaxis"} & point.keys(), "no circular plotly objects"
+
+
+def test_a_heatmap_click_hands_back_the_cell_address_and_its_customdata(app: Page):
+    """A cell's pointNumber is [row, column]; its customdata is looked up by both."""
+    drag_area = app.locator("#heat .nsewdrag")
+    drag_area.scroll_into_view_if_needed()
+    box = drag_area.bounding_box()
+    assert box is not None
+    # The top left cell: row 1 (rows count up from the bottom), column 0.
+    app.mouse.click(box["x"] + box["width"] * 0.25, box["y"] + box["height"] * 0.25)
+
+    wait_for_change(app, "heat_out", "-")
+    event = received(app, "heat_out")
+    assert isinstance(event, dict)
+    point = event["points"][0]
+    assert point["z"] == 3
+    assert point["pointNumber"] == [1, 0]
+    assert point["customdata"] == [4, 5], "the cell's own customdata, as a plain list"
 
 
 def test_clicking_the_same_point_twice_fires_twice(app: Page):
