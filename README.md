@@ -322,7 +322,7 @@ The value is never silently cut: `points` is a full list or `None`, and `point_c
 
 `click` and `hover` carry one point per trace under the pointer, so the cap matters for `selected`; hover is also debounced (100 ms), so a pointer sweeping across a dense trace sends one event when it rests, not one per point.
 
-For anything else, `post_script` runs once, after the first figure is drawn, with `{plot_id}` replaced by the graph div's id. Re-renders go through `Plotly.react` into the same graph div, so handlers attached either way stay attached and are never stacked.
+For anything else, `post_script` runs once, after the first figure is drawn, with `{plot_id}` replaced by the graph div's id. A script that throws is logged to the browser console and the chart carries on: events, theming and held updates do not depend on it. Re-renders go through `Plotly.react` into the same graph div, so handlers attached either way stay attached and are never stacked.
 
 ```python
 ANNOTATION_TO_INPUT = """

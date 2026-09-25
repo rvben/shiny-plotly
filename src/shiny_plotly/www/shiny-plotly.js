@@ -289,10 +289,16 @@
     return gd;
   }
 
+  // The figure is drawn by the time the script runs, so a script that throws is reported
+  // and the chart carries on: held updates, theming and events do not depend on it.
   function runPostScript(gd, script) {
     if (!script) return;
-    /* eslint-disable-next-line no-new-func */
-    new Function(script.replace(/\{plot_id\}/g, gd.id))();
+    try {
+      /* eslint-disable-next-line no-new-func */
+      new Function(script.replace(/\{plot_id\}/g, gd.id))();
+    } catch (err) {
+      console.error("shiny-plotly: post_script of '" + gd.id + "' failed:", err);
+    }
   }
 
   function draw(el, value) {

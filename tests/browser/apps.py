@@ -532,3 +532,30 @@ def make_scoped_theme_app() -> App:
             return bars(3)
 
     return App(app_ui, server)
+
+
+def make_post_script_app() -> App:
+    """A chart whose post_script throws, with every feature that runs after it switched on."""
+    app_ui = ui.page_fluid(
+        ui.input_action_button("grow", "grow"),
+        output_plotly("fig", height="300px", width="500px"),
+        ui.output_text("click_out"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(
+            post_script="throw new Error('post_script failed');", events="click", theme="auto"
+        )
+        def fig():
+            return bars(3)
+
+        @reactive.effect
+        @reactive.event(input.grow)
+        async def _grow():
+            await extend_traces("fig", {"x": [["x3"]], "y": [[4]]}, 0)
+
+        @render.text
+        def click_out():
+            return as_text(input.fig_click()) if input.fig_click.is_set() else "-"
+
+    return App(app_ui, server)

@@ -200,3 +200,24 @@ def test_a_fixed_height_output_on_a_plain_page_keeps_the_graph_inside_it(app: Pa
     assert output["height"] == 200
     assert graph["height"] == 200
     assert graph["width"] == 300
+
+
+def test_a_throwing_post_script_leaves_updates_theming_and_events_working(
+    page: Page, server_url: str, errors: list[str]
+):
+    """The script's error is reported; everything the chart does after its draw still runs."""
+    page.goto(server_url + "/post-script/")
+    expect(page.locator(f"#fig {SVG}").first).to_be_visible()
+
+    page.click("#grow")
+    wait_for(page, trace_y("fig", 0), [1, 2, 3, 4])
+
+    font = f"{gd('fig')}._fullLayout.font.color"
+    light = value(page, font)
+    page.evaluate("() => document.documentElement.setAttribute('data-bs-theme', 'dark')")
+    page.wait_for_function(f"() => {font} !== {json.dumps(light)}")
+
+    page.locator("#fig .bars .point").first.click(force=True)
+    expect(page.locator("#click_out")).not_to_have_text("-")
+
+    assert len(errors) == 1 and "post_script failed" in errors[0], errors
