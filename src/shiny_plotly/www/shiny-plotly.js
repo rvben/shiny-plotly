@@ -349,9 +349,62 @@
   // tab, an output showing an error or emptied by a None) is held on the output element and
   // applied, in order, right after its next draw. One for an id with no output on the page
   // is dropped with a warning.
+  //
+  // A stream into an output in a hidden tab would otherwise queue one update per tick, each
+  // a redraw on reveal, so a held extend or prepend is folded into the one held just before
+  // it when both name the same traces, attributes and cap: their points are joined and cut
+  // to the cap, which is exactly what the two calls would have left on the traces.
+
+  // Per-trace arrays for every attribute, one per index; anything else (a scalar, a typed
+  // array spelled as bdata) is applied as sent.
+  function perTraceArrays(data) {
+    var keys = Object.keys(data);
+    if (keys.length === 0) return null;
+    var count = null;
+    for (var i = 0; i < keys.length; i++) {
+      var column = data[keys[i]];
+      if (!Array.isArray(column) || !column.every(Array.isArray)) return null;
+      if (count !== null && column.length !== count) return null;
+      count = column.length;
+    }
+    return keys.sort();
+  }
+
+  function mergeable(held, next) {
+    if (held.method !== next.method) return false;
+    if (next.method !== "extendTraces" && next.method !== "prependTraces") return false;
+    var a = held.args, b = next.args;
+    if (JSON.stringify(a[1]) !== JSON.stringify(b[1])) return false;
+    if (a[2] !== b[2] || (a[2] !== null && typeof a[2] !== "number")) return false;
+    var keys = perTraceArrays(a[0]);
+    return keys !== null && JSON.stringify(keys) === JSON.stringify(perTraceArrays(b[0]));
+  }
+
+  // Folds next into held: extend appends and keeps the last maxPoints, prepend puts the
+  // newer points in front and keeps the first maxPoints, as Plotly does to the trace.
+  function merge(held, next) {
+    var cap = held.args[2];
+    var extend = held.method === "extendTraces";
+    Object.keys(held.args[0]).forEach(function (key) {
+      var older = held.args[0][key], newer = next.args[0][key];
+      held.args[0][key] = older.map(function (points, i) {
+        var joined = extend ? points.concat(newer[i]) : newer[i].concat(points);
+        if (cap === null || joined.length <= cap) return joined;
+        return extend ? joined.slice(joined.length - cap) : joined.slice(0, cap);
+      });
+    });
+  }
+
+  function hold(el, update) {
+    var queue = el._shinyPlotlyPending || (el._shinyPlotlyPending = []);
+    var held = { method: update.method, args: JSON.parse(update.args) };
+    var last = queue[queue.length - 1];
+    if (last && mergeable(last, held)) merge(last, held);
+    else queue.push(held);
+  }
 
   function applyUpdate(gd, update) {
-    var args = JSON.parse(update.args);
+    var args = update.args;
     if (update.method === "extendTraces" || update.method === "prependTraces") {
       // Both want an array of indices and no maxPoints rather than null.
       if (args[1] === null) args[1] = gd.data.map(function (_, i) { return i; });
@@ -376,10 +429,10 @@
     }
     var gd = graphDiv(el);
     if (gd && gd._shinyPlotlyDrawn) {
-      applyUpdate(gd, update);
+      applyUpdate(gd, { method: update.method, args: JSON.parse(update.args) });
       return;
     }
-    (el._shinyPlotlyPending || (el._shinyPlotlyPending = [])).push(update);
+    hold(el, update);
   }
 
   function register() {

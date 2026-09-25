@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import numpy as np
@@ -557,5 +558,87 @@ def make_post_script_app() -> App:
         @render.text
         def click_out():
             return as_text(input.fig_click()) if input.fig_click.is_set() else "-"
+
+    return App(app_ui, server)
+
+
+def burst_steps() -> list[Callable[[str], Awaitable[None]]]:
+    """
+    Every kind of held update, each a call taking the output id.
+
+    Runs of extends and prepends that can merge, broken up by what must not merge with
+    them: a relayout, a restyle, a change of max_points, other data keys, other indices.
+    """
+    steps: list[Callable[[str], Awaitable[None]]] = []
+    for i in range(20):
+        steps.append(
+            lambda id, i=i: extend_traces(id, {"x": [[f"e{i}"]], "y": [[i]]}, 0, max_points=10)
+        )
+    # Each run below differs from the one before it in one thing only.
+    for i in range(6):  # the cap
+        steps.append(
+            lambda id, i=i: extend_traces(id, {"x": [[f"f{i}"]], "y": [[100 + i]]}, 0, max_points=4)
+        )
+    for i in range(3):  # the attributes
+        steps.append(lambda id, i=i: extend_traces(id, {"y": [[200 + i]]}, 0, max_points=4))
+    steps.append(lambda id: relayout(id, {"title.text": "mid"}))
+    for i in range(8):
+        steps.append(lambda id, i=i: extend_traces(id, {"y": [[i], [-i]]}, [1, 2]))
+    for i in range(4):  # the indices
+        steps.append(lambda id, i=i: extend_traces(id, {"y": [[10 + i], [-10 - i]]}, [2, 1]))
+    for i in range(10):
+        steps.append(
+            lambda id, i=i: prepend_traces(id, {"y": [[-100 - i, -200 - i]]}, 1, max_points=15)
+        )
+    steps.append(lambda id: restyle(id, {"opacity": [0.5]}, [2]))
+    for i in range(3):
+        steps.append(lambda id, i=i: prepend_traces(id, {"y": [[i]]}, [2]))
+    return steps
+
+
+def make_held_app() -> App:
+    """One chart drawn, one in a hidden tab, and a button sending both the same burst."""
+    app_ui = ui.page_fluid(
+        ui.input_action_button("burst", "burst"),
+        ui.output_text("sent"),
+        output_plotly("shown", height="200px"),
+        ui.navset_tab(
+            ui.nav_panel("Empty", "nothing here"),
+            ui.nav_panel("Held", output_plotly("held", height="200px")),
+            id="tab",
+        ),
+    )
+
+    def figure() -> go.Figure:
+        return go.Figure(
+            [
+                go.Scatter(x=["a", "b"], y=[1, 2]),
+                go.Scatter(y=[5, 6, 7]),
+                go.Scatter(y=[8]),
+            ]
+        )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def shown():
+            return figure()
+
+        @render_plotly
+        def held():
+            return figure()
+
+        done = reactive.value(0)
+
+        @reactive.effect
+        @reactive.event(input.burst)
+        async def _burst():
+            for step in burst_steps():
+                await step("shown")
+                await step("held")
+            done.set(done() + 1)
+
+        @render.text
+        def sent():
+            return f"sent {done()}"
 
     return App(app_ui, server)

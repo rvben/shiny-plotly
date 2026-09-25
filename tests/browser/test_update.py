@@ -221,3 +221,43 @@ def test_a_throwing_post_script_leaves_updates_theming_and_events_working(
     expect(page.locator("#click_out")).not_to_have_text("-")
 
     assert len(errors) == 1 and "post_script failed" in errors[0], errors
+
+
+HELD_STATE = """
+(() => {
+  const g = document.getElementById("%s-plotly");
+  return {
+    data: g.data.map((t) => ({x: t.x ? Array.from(t.x) : null, y: Array.from(t.y),
+                              opacity: t.opacity === undefined ? null : t.opacity})),
+    title: (g.layout.title || {}).text,
+  };
+})()
+"""
+
+
+def test_updates_held_for_a_hidden_output_are_merged_and_land_as_if_applied_one_by_one(
+    page: Page, server_url: str, errors: list[str]
+):
+    """A hidden output folds each run of extends or prepends into one, to the same result."""
+    page.goto(server_url + "/held/")
+    expect(page.locator(f"#shown {SVG}").first).to_be_visible()
+
+    page.click("#burst")
+    expect(page.locator("#sent")).to_have_text("sent 1")
+
+    # 57 extends and prepends in seven runs, plus a relayout and a restyle: nine.
+    assert value(page, "document.getElementById('held')._shinyPlotlyPending.length") == 9
+    # Held points are cut to the cap as they merge, so a stream held for an hour keeps a
+    # window of points, not an hour of them.
+    first_run = "document.getElementById('held')._shinyPlotlyPending[0].args[0]"
+    assert value(page, f"{first_run}.y[0].length") == 10
+
+    page.get_by_role("tab", name="Held").click()
+    expect(page.locator(f"#held {SVG}").first).to_be_visible()
+    wait_for(page, "document.getElementById('held')._shinyPlotlyPending", None)
+
+    applied_one_by_one = value(page, HELD_STATE % "shown")
+    assert isinstance(applied_one_by_one, dict)
+    assert value(page, HELD_STATE % "held") == applied_one_by_one
+    assert applied_one_by_one["title"] == "mid"
+    assert errors == []

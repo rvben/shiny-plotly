@@ -8,9 +8,10 @@ dashboard wants for a new point every second. They ride on Shiny's custom messag
 are applied by the browser helper to the graph div of the named output. One sent while
 the output has no figure drawn (its first render is still running, it sits in a hidden
 tab, it shows an error or was emptied by ``None``) is held and applied, in order, right
-after the output's next draw. A re-render replaces the figure, updates included, with
-what the render function returns. All of these are coroutines: await them from an
-``async def`` effect.
+after the output's next draw; consecutive held extends (or prepends) to the same traces,
+attributes and ``max_points`` are merged into one as they arrive. A re-render replaces
+the figure, updates included, with what the render function returns. All of these are
+coroutines: await them from an ``async def`` effect.
 """
 
 from __future__ import annotations
