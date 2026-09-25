@@ -196,6 +196,11 @@ def test_numpy_non_integers_are_refused_like_their_python_counterparts():
         run(extend_traces("fig", {"y": [[1]]}, max_points=np.bool_(True)))
     with pytest.raises(ValueError, match="indices"):
         run(restyle("fig", {"opacity": 1}, indices=np.array([0.5])))
+    # numpy before 2.3 still reads its bools as indices 0 and 1, warning only.
+    with pytest.raises(ValueError, match="indices"):
+        run(restyle("fig", {"opacity": 1}, indices=np.True_))
+    with pytest.raises(ValueError, match="indices"):
+        run(restyle("fig", {"opacity": 1}, indices=np.array([True, False])))
 
 
 def test_add_traces_requires_at_least_one_trace():

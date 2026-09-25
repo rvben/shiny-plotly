@@ -11,11 +11,12 @@ def as_int(value: Any) -> int:
     ``value`` as a Python int, for anything integer-like: ``int`` and numpy's integers.
 
     Raises TypeError for anything else. ``bool`` is refused by name: it is an int in Python
-    but serializes to a JSON ``true``, which plotly.js does not read as a number (numpy's
-    bool is no integer to begin with). A float, even a whole one, is refused as well, the
-    way ``range()`` and list indexing refuse it.
+    but serializes to a JSON ``true``, which plotly.js does not read as a number. numpy's
+    bool is refused by its dtype, since numpy before 2.3 still lets it pass as an index,
+    with only a DeprecationWarning, as 0 or 1. A float, even a whole one, is refused as
+    well, the way ``range()`` and list indexing refuse it.
     """
-    if isinstance(value, bool):
+    if isinstance(value, bool) or getattr(getattr(value, "dtype", None), "kind", None) == "b":
         raise TypeError(f"expected an integer, got {value!r}")
     return operator.index(value)
 
