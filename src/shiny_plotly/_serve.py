@@ -10,7 +10,8 @@ Importing ``shiny_plotly`` wraps ``shiny.App.__init__``, so every app built afte
 route for the bundle's exact path in front of Shiny's mount, and a background thread starts
 compressing the bundle once per process. Both happen while the app is being built, before it
 can serve anything, so the first request of the process is already served here; until the
-compression has finished the route serves the raw file with the same cache headers. An app
+compression has finished the route serves the raw file, marked for revalidation rather than
+immutable when the client asked for an encoding that is still on its way. An app
 built before the import can still ask for the route with :func:`enable_compressed_plotly_js`,
 and each session enables it for its own app, so it is there either way.
 """
@@ -44,6 +45,10 @@ __all__ = (
 
 ROUTE_NAME = "shiny-plotly-bundle"
 CACHE_CONTROL = "public, max-age=31536000, immutable"
+# For a body that is not yet the one this client will get: the raw file, served while the
+# encoding it asked for is still being compressed. Stored, but revalidated on every use,
+# so the next visit swaps it for the compressed body instead of keeping it for a year.
+PROVISIONAL_CACHE_CONTROL = "no-cache"
 MEDIA_TYPE = "text/javascript; charset=utf-8"
 
 logger = logging.getLogger(__name__)
@@ -72,6 +77,8 @@ class CompressedBundle:
             f"{stat.st_size}-{stat.st_mtime_ns}".encode(), usedforsecurity=False
         ).hexdigest()[:16]
         self.encodings: dict[str, bytes] = {}
+        # Every encoding the compression will produce, in the order it produces them.
+        self.produces: tuple[str, ...] = ("br", "gzip") if brotli is not None else ("gzip",)
         self._ready = threading.Event()
         self._started = False
         self._lock = threading.Lock()
@@ -85,6 +92,11 @@ class CompressedBundle:
 
     def wait(self, timeout: float | None = None) -> bool:
         return self._ready.wait(timeout)
+
+    @property
+    def ready(self) -> bool:
+        """Whether compression has finished, every encoding it will produce in place."""
+        return self._ready.is_set()
 
     def etag(self, encoding: str | None) -> str:
         return f'"{self.etag_base}"' if encoding is None else f'"{self.etag_base}-{encoding}"'
@@ -132,17 +144,19 @@ def refuses(params: str) -> bool:
     Whether the parameters of one ``Accept-Encoding`` entry rule its encoding out.
 
     RFC 9110 writes a refusal as a qvalue of zero, which is ``q=0`` but equally ``q=0.0``
-    and ``q=0.000``. Anything else leaves the encoding on offer, an unparsable qvalue
-    included: serving a client the encoding it asked for beats guessing at a malformed
-    header.
+    and ``q=0.000``, wherever it stands among the entry's ``;``-separated parameters.
+    Anything else leaves the encoding on offer, an unparsable qvalue included: serving a
+    client the encoding it asked for beats guessing at a malformed header.
     """
-    key, _, value = params.partition("=")
-    if key.strip().lower() != "q":
-        return False
-    try:
-        return float(value) == 0
-    except ValueError:
-        return False
+    for param in params.split(";"):
+        key, _, value = param.partition("=")
+        if key.strip().lower() != "q":
+            continue
+        try:
+            return float(value) == 0
+        except ValueError:
+            return False
+    return False
 
 
 def accepted_encodings(accept_encoding: str | None) -> Iterator[str]:
@@ -150,14 +164,32 @@ def accepted_encodings(accept_encoding: str | None) -> Iterator[str]:
     if not accept_encoding:
         return
     offered: set[str] = set()
+    refused: set[str] = set()
     for part in accept_encoding.split(","):
         token, _, params = part.partition(";")
-        if refuses(params):
-            continue
-        offered.add(token.strip().lower())
+        (refused if refuses(params) else offered).add(token.strip().lower())
+    # "*" stands for every encoding the header does not name (RFC 9110, 12.5.3), so a
+    # named refusal holds against it, and a named acceptance holds against "*;q=0".
+    wildcard = "*" in offered
     for encoding in ("br", "gzip"):
-        if encoding in offered or "*" in offered:
+        if encoding in offered or (wildcard and encoding not in refused):
             yield encoding
+
+
+def etag_matches(if_none_match: str, etag: str) -> bool:
+    """
+    Whether an ``If-None-Match`` header names ``etag``, compared as RFC 9110 requires.
+
+    The comparison is weak (13.1.2): ``W/"x"`` matches ``"x"``, since a proxy may weaken a
+    tag it passes on. ``*`` matches any current representation, which this route always has.
+    """
+    for candidate in if_none_match.split(","):
+        tag = candidate.strip()
+        if tag == "*":
+            return True
+        if tag.removeprefix("W/") == etag:
+            return True
+    return False
 
 
 def response_for(
@@ -167,10 +199,19 @@ def response_for(
     if_none_match: str | None,
     method: str = "GET",
 ) -> Response:
-    encoding = next((e for e in accepted_encodings(accept_encoding) if e in bundle.encodings), None)
+    accepted = list(accepted_encodings(accept_encoding))
+    encoding = next((e for e in accepted if e in bundle.encodings), None)
+    # The encoding this client gets once compression is done. Until then it may be served
+    # the raw file instead, which must not be the body it caches for a year.
+    eventual = next((e for e in accepted if e in bundle.produces), None)
+    final = bundle.ready or encoding == eventual
     etag = bundle.etag(encoding)
-    headers = {"Cache-Control": CACHE_CONTROL, "Vary": "Accept-Encoding", "ETag": etag}
-    if if_none_match is not None and etag in [t.strip() for t in if_none_match.split(",")]:
+    headers = {
+        "Cache-Control": CACHE_CONTROL if final else PROVISIONAL_CACHE_CONTROL,
+        "Vary": "Accept-Encoding",
+        "ETag": etag,
+    }
+    if if_none_match is not None and etag_matches(if_none_match, etag):
         return Response(status_code=304, headers=headers)
     if encoding is None:
         # Streams the file from disk; HEAD is detected from the request scope.

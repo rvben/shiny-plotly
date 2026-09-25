@@ -278,15 +278,83 @@ def test_under_pyodide_the_route_is_skipped_and_the_app_still_renders(monkeypatc
     assert _serve.ROUTE_NAME not in names
 
 
-def test_bundle_before_compression_has_finished_is_served_raw_and_cacheable():
-    """The route never waits for the background compression; it serves what it has."""
+def test_bundle_before_compression_has_finished_is_served_raw_and_revalidated():
+    """
+    The route never waits for the background compression; it serves what it has, but a
+    client that will be offered a compressed encoding must not keep the raw file for a year.
+    """
     pending = _serve.CompressedBundle(_serve.bundle().path)
 
     resp = _serve.response_for(pending, accept_encoding="gzip, br", if_none_match=None)
 
     assert resp.status_code == 200
     assert "content-encoding" not in resp.headers
+    assert resp.headers["cache-control"] == "no-cache"
+    assert resp.headers["etag"] == pending.etag(None)
+
+
+def test_a_client_revalidating_the_early_raw_file_gets_the_compressed_one_once_ready(tmp_path):
+    bundle = stub_bundle(tmp_path)
+    early = _serve.response_for(bundle, accept_encoding="br, gzip", if_none_match=None)
+
+    bundle.start()
+    assert bundle.wait(timeout=30)
+    later = _serve.response_for(
+        bundle, accept_encoding="br, gzip", if_none_match=early.headers["etag"]
+    )
+
+    assert later.status_code == 200, "the raw ETag no longer matches: the body is new"
+    assert later.headers["content-encoding"] == "br"
+    assert later.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_raw_is_final_for_a_client_that_takes_no_encoding_even_before_compression():
+    pending = _serve.CompressedBundle(_serve.bundle().path)
+
+    resp = _serve.response_for(pending, accept_encoding="identity", if_none_match=None)
+
     assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_the_encoding_served_mid_compression_is_final_when_it_is_the_one_preferred(tmp_path):
+    """brotli is produced first; a client preferring it need not wait for gzip too."""
+    bundle = stub_bundle(tmp_path)
+    bundle.encodings["br"] = brotli.compress(bundle.path.read_bytes())
+
+    preferred = _serve.response_for(bundle, accept_encoding="gzip, br", if_none_match=None)
+    gzip_only = _serve.response_for(bundle, accept_encoding="gzip", if_none_match=None)
+
+    assert preferred.headers["content-encoding"] == "br"
+    assert preferred.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert "content-encoding" not in gzip_only.headers
+    assert gzip_only.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.parametrize(
+    "if_none_match",
+    ["*", "W/{etag}", '"other", {etag}', '"other",W/{etag}', " {etag} "],
+)
+def test_revalidation_matches_the_way_rfc_9110_compares_tags(client, if_none_match):
+    """If-None-Match compares weakly, and ``*`` matches any current representation."""
+    etag = client.get(BUNDLE_URL, headers={"Accept-Encoding": "gzip"}).headers["etag"]
+
+    resp = client.get(
+        BUNDLE_URL,
+        headers={"Accept-Encoding": "gzip", "If-None-Match": if_none_match.format(etag=etag)},
+    )
+
+    assert resp.status_code == 304
+    assert resp.headers["etag"] == etag
+
+
+@pytest.mark.parametrize("if_none_match", ['"other"', 'W/"other"', ""])
+def test_revalidation_with_a_tag_that_does_not_match_gets_the_body(client, if_none_match):
+    resp = client.get(
+        BUNDLE_URL, headers={"Accept-Encoding": "gzip", "If-None-Match": if_none_match}
+    )
+
+    assert resp.status_code == 200
+    assert resp.content == RAW
 
 
 def test_gzip_body_is_the_bundle():
@@ -309,6 +377,11 @@ def test_gzip_body_is_the_bundle():
         ("gzip, br;q=0.0", ["gzip"]),
         ("gzip, br;q=0.000", ["gzip"]),
         ("*;q=0", []),
+        ("gzip;q=0, *", ["br"]),
+        ("*, gzip;q=0", ["br"]),
+        ("br;q=0, *;q=1", ["gzip"]),
+        ("*;q=0, gzip", ["gzip"]),
+        ("br;level=5;q=0, gzip", ["gzip"]),
         ("identity", []),
         ("deflate, zstd", []),
         ("br;q=none-of-that", ["br"]),
