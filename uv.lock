@@ -1667,7 +1667,7 @@ wheels = [
 
 [[package]]
 name = "shiny-plotly"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "brotli", marker = "sys_platform != 'emscripten'" },
