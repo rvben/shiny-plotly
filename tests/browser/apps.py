@@ -642,3 +642,108 @@ def make_held_app() -> App:
             return f"sent {done()}"
 
     return App(app_ui, server)
+
+
+def make_arrays_app() -> App:
+    """
+    Figures built from numpy, which plotly 6 sends as binary, updated in place.
+
+    Each button extends or prepends one output, with plain lists and with numpy arrays of
+    other dtypes than the figure's: the int8 a small ``np.arange`` travels as must take a
+    300 and a 0.5, and no update may reach the figure in any other form than its values.
+    """
+    app_ui = ui.page_fluid(
+        ui.input_action_button("extend_plain", "extend plain"),
+        ui.input_action_button("extend_capped", "extend capped"),
+        ui.input_action_button("prepend", "prepend"),
+        ui.input_action_button("extend_numpy", "extend numpy"),
+        ui.input_action_button("replace", "replace"),
+        ui.input_action_button("burst", "burst"),
+        ui.input_action_button("add_row", "add row"),
+        ui.output_text("bursts"),
+        output_plotly("ints", height="200px", width="400px"),
+        output_plotly("floats", height="200px", width="400px"),
+        output_plotly("two", height="200px", width="400px"),
+        output_plotly("grid", height="200px", width="400px"),
+        ui.navset_tab(
+            ui.nav_panel("Empty", "nothing here"),
+            ui.nav_panel("Held", output_plotly("held", height="200px", width="400px")),
+            id="tab",
+        ),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def ints():
+            return go.Figure(go.Scatter(x=np.arange(3), y=np.arange(3)))
+
+        @render_plotly
+        def floats():
+            return go.Figure(go.Scatter(x=np.linspace(0, 1, 3), y=np.array([0.5, 1.5, 2.5])))
+
+        @render_plotly
+        def two():
+            return go.Figure([go.Scatter(y=np.arange(3)), go.Scatter(y=[5, 6])])
+
+        @render_plotly
+        def held():
+            return go.Figure(go.Scatter(y=np.arange(3)))
+
+        @render_plotly
+        def grid():
+            # A 2-D array travels as one binary block with its shape.
+            return go.Figure(go.Heatmap(z=np.arange(4).reshape(2, 2)))
+
+        @reactive.effect
+        @reactive.event(input.add_row)
+        async def _add_row():
+            await extend_traces("grid", {"z": [[[40, 50.5]]]})
+
+        @reactive.effect
+        @reactive.event(input.extend_plain)
+        async def _extend_plain():
+            await extend_traces("ints", {"x": [[3, 4]], "y": [[300, 0.5]]})
+
+        @reactive.effect
+        @reactive.event(input.extend_capped)
+        async def _extend_capped():
+            await extend_traces("floats", {"x": [[2]], "y": [[3.5]]}, max_points=3)
+
+        @reactive.effect
+        @reactive.event(input.prepend)
+        async def _prepend():
+            await prepend_traces("two", {"y": [[-1], [4]]}, max_points=3)
+
+        @reactive.effect
+        @reactive.event(input.extend_numpy)
+        async def _extend_numpy():
+            await extend_traces(
+                "ints",
+                {
+                    "x": [np.array([5, 6, 7], dtype=np.uint8)],
+                    "y": [np.array([2**40, -1, 7], dtype=np.int64)],
+                },
+            )
+            await extend_traces("floats", {"y": [np.array([0.25], dtype=np.float32)]})
+
+        @reactive.effect
+        @reactive.event(input.replace)
+        async def _replace():
+            await restyle("floats", {"y": [np.array([9.5, 10.5])]})
+            await add_traces("two", go.Scatter(y=np.array([-3, 3], dtype=np.int16)))
+            await update("two", restyle={"marker.size": [np.array([11.0, 12.0])]}, indices=[1])
+
+        sent = reactive.value(0)
+
+        @reactive.effect
+        @reactive.event(input.burst)
+        async def _burst():
+            for i in range(5):
+                await extend_traces("held", {"y": [np.array([10.0 * i + 0.5])]}, max_points=6)
+            sent.set(sent() + 1)
+
+        @render.text
+        def bursts():
+            return f"bursts {sent()}"
+
+    return App(app_ui, server)

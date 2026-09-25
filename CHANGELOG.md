@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `extend_traces` and `prepend_traces` work on traces built from numpy arrays or pandas columns with plotly 6. plotly 6 sends those arrays in binary form, which `Plotly.extendTraces` refuses ("cannot extend missing or non-array attribute"), so the update failed in the browser and the chart stopped updating. The new points now land as their own values, even ones the original array's type could not hold, such as 300 or 0.5 added to `np.arange(3)`. This covers held updates and 2-D arrays such as a heatmap's `z`.
+- `extend_traces` and `prepend_traces` are typed to take numpy arrays as the per-trace values (`{"y": [np.array([...])]}`), which they always accepted at runtime.
+
 ## [0.4.2](https://github.com/rvben/shiny-plotly/compare/v0.4.1...v0.4.2) - 2026-09-25
 
 ### Fixed

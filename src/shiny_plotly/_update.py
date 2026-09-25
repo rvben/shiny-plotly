@@ -85,7 +85,7 @@ async def _send(id: str, method: str, args: Sequence[Any], session: Session | No
 
 async def extend_traces(
     id: str,
-    data: Mapping[str, Sequence[Sequence[Any]]],
+    data: Mapping[str, Sequence[Any]],
     indices: Indices = None,
     *,
     max_points: int | None = None,
@@ -108,7 +108,7 @@ async def extend_traces(
 
 async def prepend_traces(
     id: str,
-    data: Mapping[str, Sequence[Sequence[Any]]],
+    data: Mapping[str, Sequence[Any]],
     indices: Indices = None,
     *,
     max_points: int | None = None,

@@ -403,12 +403,69 @@
     else queue.push(held);
   }
 
+  // plotly 6 sends a figure's numpy arrays as binary, {dtype, bdata[, shape]}, which
+  // plotly.js keeps on the trace as sent and draws from a typed array.
+  var TYPED_ARRAYS = {
+    i1: Int8Array, u1: Uint8Array, u1c: Uint8ClampedArray, i2: Int16Array, u2: Uint16Array,
+    i4: Int32Array, u4: Uint32Array, f4: Float32Array, f8: Float64Array
+  };
+
+  function isBinary(value) {
+    return value !== null && typeof value === "object" && typeof value.bdata === "string" &&
+      TYPED_ARRAYS.hasOwnProperty(value.dtype);
+  }
+
+  // The values of a 1-D binary array as a typed array, of a 2-D one as rows of them; null
+  // for more dimensions, which no update extends.
+  function decodeBinary(spec) {
+    var shape = spec.shape ? String(spec.shape).split(",").map(Number) : [];
+    if (shape.length > 2) return null;
+    var bytes = window.atob(spec.bdata);
+    var buffer = new Uint8Array(bytes.length);
+    for (var i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
+    var flat = new TYPED_ARRAYS[spec.dtype](buffer.buffer);
+    if (shape.length < 2) return flat;
+    var rows = [];
+    for (var r = 0; r < shape[0]; r++) rows.push(flat.subarray(r * shape[1], (r + 1) * shape[1]));
+    return rows;
+  }
+
+  // An array of values, or of rows of values, as plain arrays, whatever form it came in;
+  // anything else as it is.
+  function plainArray(value) {
+    var decoded = isBinary(value) ? decodeBinary(value) : value;
+    if (decoded === null) return value;
+    if (ArrayBuffer.isView(decoded)) return Array.prototype.slice.call(decoded);
+    if (Array.isArray(decoded)) {
+      return decoded.map(function (v) { return ArrayBuffer.isView(v) ? plainArray(v) : v; });
+    }
+    return decoded;
+  }
+
+  // extendTraces and prependTraces join plain arrays to plain arrays and a typed array only
+  // to one of its own type, so a trace built from numpy (an int8 np.arange, say) could take
+  // no new points at all. The attributes an extend or prepend reaches become plain arrays
+  // of their values first, as if the figure had been built from lists; a plain array holds
+  // a 300 or a 0.5 where an int8 array would wrap or truncate them.
+  function plainTargets(gd, data, indices) {
+    Object.keys(data).forEach(function (key) {
+      var path = key.split(".");
+      indices.forEach(function (index) {
+        var node = gd.data[index < 0 ? gd.data.length + index : index];
+        for (var i = 0; node && i < path.length - 1; i++) node = node[path[i]];
+        var last = path[path.length - 1];
+        if (node && node[last] !== undefined) node[last] = plainArray(node[last]);
+      });
+    });
+  }
+
   function applyUpdate(gd, update) {
     var args = update.args;
     if (update.method === "extendTraces" || update.method === "prependTraces") {
       // Both want an array of indices and no maxPoints rather than null.
       if (args[1] === null) args[1] = gd.data.map(function (_, i) { return i; });
       if (args[2] === null) args.length = 2;
+      plainTargets(gd, args[0], args[1]);
     }
     return window.Plotly[update.method].apply(window.Plotly, [gd].concat(args));
   }

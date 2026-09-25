@@ -15,6 +15,7 @@ from starlette.routing import Mount
 
 from .apps import (
     make_app,
+    make_arrays_app,
     make_dark_app,
     make_events_app,
     make_held_app,
@@ -52,6 +53,7 @@ def server_url() -> Iterator[str]:
             Mount("/hidden", app=make_hidden_app()),
             Mount("/post-script", app=make_post_script_app()),
             Mount("/held", app=make_held_app()),
+            Mount("/arrays", app=make_arrays_app()),
             Mount("/stream", app=load_example("streaming_app.py")),
             Mount("/demo", app=load_example("shinylive/app.py")),
             Mount("/", app=make_app()),
