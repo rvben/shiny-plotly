@@ -140,6 +140,17 @@ def test_max_event_points_must_be_a_positive_int_or_none(bad):
             return bar()
 
 
+def test_max_event_points_takes_a_numpy_integer_as_a_python_int():
+    np = pytest.importorskip("numpy")
+
+    @render_plotly(max_event_points=np.int64(500))
+    def sales():
+        return bar()
+
+    assert sales.max_event_points == 500
+    assert type(sales.max_event_points) is int
+
+
 def test_theme_auto_is_the_plotly_light_dark_pair():
     @render_plotly(theme="auto")
     def sales():

@@ -21,6 +21,8 @@ from typing import Any
 from plotly.io.json import to_json_plotly
 from shiny.session import Session, require_active_session
 
+from ._validate import as_int, as_positive_int
+
 __all__ = (
     "add_traces",
     "delete_traces",
@@ -40,20 +42,23 @@ Trace = Mapping[str, Any] | Any
 
 
 def _indices(indices: Indices) -> list[int] | None:
+    """Trace indices as a list of Python ints; numpy integers and arrays are taken too."""
     if indices is None:
         return None
-    if isinstance(indices, int):
-        return [indices]
-    return list(indices)
+    try:
+        return [as_int(indices)]
+    except TypeError:
+        pass
+    try:
+        return [as_int(index) for index in indices]  # type: ignore[union-attr]
+    except TypeError:
+        raise ValueError(f"indices must be an integer or integers, got {indices!r}") from None
 
 
-def _check_max_points(max_points: int | None) -> None:
-    # bool is excluded by name: it is an int in Python but serializes to a JSON true,
-    # which plotly.js reads as non-numeric and quietly treats as no cap at all.
-    if max_points is not None and (
-        isinstance(max_points, bool) or not isinstance(max_points, int) or max_points < 1
-    ):
-        raise ValueError(f"max_points must be a positive integer, got {max_points!r}")
+def _max_points(max_points: int | None) -> int | None:
+    # A JSON true, which a Python bool would become, reads to plotly.js as non-numeric and
+    # quietly means no cap at all; as_positive_int refuses it here instead.
+    return None if max_points is None else as_positive_int(max_points, "max_points")
 
 
 def _trace_json(trace: Trace) -> Any:
@@ -97,8 +102,7 @@ async def extend_traces(
     The update is sent to the session's client; outside a session it fails. Use it
     from a reactive effect, for instance one driven by ``reactive.invalidate_later``.
     """
-    _check_max_points(max_points)
-    await _send(id, "extendTraces", [data, _indices(indices), max_points], session)
+    await _send(id, "extendTraces", [data, _indices(indices), _max_points(max_points)], session)
 
 
 async def prepend_traces(
@@ -116,8 +120,7 @@ async def prepend_traces(
     ones, and ``max_points`` drops the newest points past that many instead of the
     oldest. Same ``data`` and ``indices`` shapes.
     """
-    _check_max_points(max_points)
-    await _send(id, "prependTraces", [data, _indices(indices), max_points], session)
+    await _send(id, "prependTraces", [data, _indices(indices), _max_points(max_points)], session)
 
 
 async def add_traces(

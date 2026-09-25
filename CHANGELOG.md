@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The in-place updates take a numpy integer for `indices`, where it failed with `TypeError: 'numpy.int64' object is not iterable`, and `extend_traces` and `prepend_traces` take one for `max_points`, as `render_plotly` does for `max_event_points`, where both were refused as not a positive integer. Indices that are not integers (a float, a string, a `bool`) are refused with a `ValueError` naming the argument instead of being sent to the browser.
 - A client that refuses an encoding by name in `Accept-Encoding` is no longer sent it because the header also has a `*`: `gzip;q=0, *` asked for anything but gzip and got gzip. A refusal is also read wherever `q` stands among the entry's parameters.
 - `If-None-Match` for plotly.min.js now matches a weak validator (`W/"..."`, as a proxy may send it) and `*`, returning 304 instead of the whole bundle again.
 - plotly.min.js served raw while its compression is still running, which happens only on the first requests of a process, is marked `Cache-Control: no-cache` instead of immutable for a year. A browser that asked for brotli or gzip revalidates it on the next visit and gets the compressed file, instead of keeping the 4.8 MB raw file in its cache.

@@ -64,13 +64,16 @@ def make_app() -> App:
             await prepend_traces("fig", {"y": [[0]]}, indices=0, max_points=4)
             await update("fig", restyle={"marker.color": "red"}, relayout={"title.text": "u"})
             await update("fig", restyle={"opacity": [0.5]}, indices=[0])
+            # What a dataframe or an event hands back: numpy integers, not Python ints.
+            await extend_traces("fig", {"y": [[5]]}, indices=np.int64(0), max_points=np.int32(3))
+            await restyle("fig", {"opacity": [1]}, indices=np.array([0]))
 
         mod_server("m")
 
     return App(app_ui, server)
 
 
-MESSAGE_COUNT = 12
+MESSAGE_COUNT = 14
 
 
 def custom_messages(client: TestClient) -> list[dict]:
@@ -149,8 +152,15 @@ def test_update_sends_restyle_and_relayout_in_one_call(messages):
     assert json.loads(restyle_only["args"]) == [{"opacity": [0.5]}, {}, [0]]
 
 
+def test_numpy_integers_are_taken_as_indices_and_max_points(messages):
+    extend, restyle_np = messages[11], messages[12]
+
+    assert json.loads(extend["args"]) == [{"y": [[5]]}, [0], 3]
+    assert json.loads(restyle_np["args"]) == [{"opacity": [1]}, [0]]
+
+
 def test_ids_are_namespaced_inside_a_module(messages):
-    msg = messages[11]
+    msg = messages[13]
 
     assert msg["id"] == "m-fig"
     assert json.loads(msg["args"]) == [{"title.text": "from the module"}]
@@ -167,6 +177,25 @@ def test_max_points_must_be_a_positive_integer(bad):
 def test_prepend_traces_max_points_must_be_a_positive_integer(bad):
     with pytest.raises(ValueError, match="max_points"):
         run(prepend_traces("fig", {"y": [[1]]}, max_points=bad))
+
+
+@pytest.mark.parametrize("bad", [0.5, "0", True, None])
+def test_indices_must_be_integers(bad):
+    """Caught here, where the call is, rather than as a plotly.js error in the browser."""
+    with pytest.raises(ValueError, match="indices"):
+        run(restyle("fig", {"opacity": 1}, indices=[0, bad]))
+    with pytest.raises(ValueError, match="indices"):
+        run(delete_traces("fig", bad if bad is not None else 1.5))  # type: ignore[arg-type]
+
+
+def test_numpy_non_integers_are_refused_like_their_python_counterparts():
+    np = pytest.importorskip("numpy")
+    with pytest.raises(ValueError, match="max_points"):
+        run(extend_traces("fig", {"y": [[1]]}, max_points=np.float64(3)))
+    with pytest.raises(ValueError, match="max_points"):
+        run(extend_traces("fig", {"y": [[1]]}, max_points=np.bool_(True)))
+    with pytest.raises(ValueError, match="indices"):
+        run(restyle("fig", {"opacity": 1}, indices=np.array([0.5])))
 
 
 def test_add_traces_requires_at_least_one_trace():

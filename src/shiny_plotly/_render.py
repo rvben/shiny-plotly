@@ -16,6 +16,7 @@ from shiny.ui.fill import as_fill_item, as_fillable_container
 from ._deps import plotly_js, shiny_plotly_js
 from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, fill_in_margins
 from ._serve import enable_compressed_plotly_js
+from ._validate import as_positive_int
 
 __all__ = ("DEFAULT_MAX_EVENT_POINTS", "EVENTS", "output_plotly", "render_plotly")
 
@@ -127,11 +128,7 @@ def template_key(template_json: str) -> str:
 
 
 def normalize_max_event_points(value: int | None) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(f"max_event_points must be a positive int or None, got {value!r}")
-    return value
+    return None if value is None else as_positive_int(value, "max_event_points")
 
 
 def output_plotly(id: str, *, width: str | None = None, height: str | None = None) -> Tag:
