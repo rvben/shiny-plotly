@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/rvben/shiny-plotly/compare/v0.4.1...v0.4.2) - 2026-09-25
+
 ### Fixed
 
 - A numpy bool is refused as `indices`, `max_points` or `max_event_points`, like a Python `bool`. With numpy older than 2.3, `np.True_` was taken as the integer 1 (with only a DeprecationWarning), so `max_points=np.True_` capped a trace at one point instead of raising.
