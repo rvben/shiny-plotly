@@ -11,11 +11,14 @@ from typing import Any, cast
 
 import numpy as np
 import plotly.graph_objects as go
+import plotly.io as pio
 import pytest
 from shiny import App, Inputs, Outputs, Session, module, reactive, ui
 from starlette.testclient import TestClient
 
 from shiny_plotly import extend_traces, output_plotly, relayout, render_plotly, restyle
+from shiny_plotly._html import as_fig_dict, encode_figure_arrays, plotly_utils
+from shiny_plotly._resample import as_array, resample_figure
 from shiny_plotly._views import _outputs
 
 from helpers import run
@@ -300,3 +303,61 @@ def test_outside_a_session_the_overview_is_sent_with_no_revision():
 
     assert value["resample"]["revision"] is None
     assert len(value["resample"]["index_maps"]["0"]) <= BUDGET
+
+
+@pytest.mark.parametrize("frames", [False, True])
+def test_native_figure_conversion_preserves_properties_and_copies_arrays(frames):
+    figure = long_figure()
+    figure.update_layout(title="Original", xaxis={"range": [10, 20]})
+    if frames:
+        figure.frames = [go.Frame(name="next", data=[go.Scatter(y=np.arange(5.0))])]
+    before = pio.to_json(figure)
+
+    native = as_fig_dict(figure, preserve_arrays=True)
+
+    assert isinstance(native["data"][0]["x"], np.ndarray)
+    np.testing.assert_array_equal(native["data"][0]["x"], figure.data[0]["x"])
+    encoded = as_fig_dict(figure, preserve_arrays=True)
+    encode_figure_arrays(encoded)
+    assert pio.to_json(encoded, validate=False) == before
+    native["data"][0]["y"][0] = 999
+    native["layout"]["xaxis"]["range"][0] = 99
+    if frames:
+        native["frames"][0]["data"][0]["y"][0] = 999
+    assert pio.to_json(figure) == before, "sampling and layout edits cannot mutate the figure"
+
+
+@pytest.mark.parametrize("from_dict", [False, True])
+def test_resampling_skips_full_figure_encoding_without_changing_the_sample(monkeypatch, from_dict):
+    figure = long_figure()
+    trace = cast(Any, figure.data[0])
+    trace.y = np.where(np.arange(N) % 101 == 0, np.nan, trace.y)
+    trace.marker.color = np.arange(N, dtype=np.float32)
+    trace.selectedpoints = [0, 30, 3000]
+    # Include a whole, non-resampled trace to check its final encoding too.
+    figure.add_trace(go.Heatmap(z=np.arange(12, dtype=np.float32).reshape(3, 4)))
+    before = figure.to_dict()
+    expected, record = resample_figure(before, BUDGET)
+    expected_json = pio.to_json(expected, validate=False, remove_uids=False)
+
+    def no_full_encoding():
+        pytest.fail("resampling encoded the full figure before sampling")
+
+    monkeypatch.setattr(figure, "to_dict", no_full_encoding)
+    rendered = cast(
+        dict[str, Any],
+        run(render_plotly(resample=BUDGET).transform(before if from_dict else figure)),
+    )
+
+    assert rendered["figure"] == expected_json
+    assert rendered["resample"]["index_maps"]["0"] == record.overview[0].tolist()
+    np.testing.assert_array_equal(trace.y, as_array(before["data"][0]["y"]))
+
+
+def test_native_arrays_still_serialize_without_plotlys_binary_encoder(monkeypatch):
+    monkeypatch.delattr(plotly_utils, "convert_to_base64", raising=False)
+    native = {"data": [{"type": "scatter", "y": np.arange(3.0)}], "layout": {}}
+
+    encode_figure_arrays(native)
+
+    assert json.loads(cast(str, pio.to_json(native, validate=False)))["data"][0]["y"] == [0, 1, 2]

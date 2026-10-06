@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import plotly.io as pio
+from _plotly_utils import utils as plotly_utils
 from htmltools import HTML, Tag, TagList, css, tags
 from plotly.basedatatypes import BaseFigure
 
@@ -102,7 +103,7 @@ def fig_to_ui(
     return TagList(plotly_js(), shiny_plotly_js(), container)
 
 
-def as_fig_dict(fig: Figure) -> dict[str, Any]:
+def as_fig_dict(fig: Figure, *, preserve_arrays: bool = False) -> dict[str, Any]:
     """
     The figure as a plain dict carrying a ``layout`` dict, whichever way it was given.
 
@@ -113,12 +114,46 @@ def as_fig_dict(fig: Figure) -> dict[str, Any]:
     # carries a layout; a dict is passed through as the caller's JSON, so pio.to_html gets
     # validate=False and never reconstructs a Figure from it.
     if isinstance(fig, BaseFigure):
+        if preserve_arrays:
+            # Figure.to_dict() encodes full numpy arrays as base64 in plotly 6. A
+            # sampler would immediately decode them again. The public component
+            # serializers copy the same properties while retaining native arrays,
+            # so sampling can run before encoding anything sent to the browser.
+            result = {
+                "data": [trace.to_plotly_json() for trace in cast(Any, fig).data],
+                "layout": fig.layout.to_plotly_json(),
+            }
+            if fig.frames:
+                result["frames"] = [frame.to_plotly_json() for frame in fig.frames]
+            return result
         return fig.to_dict()
     if isinstance(fig, dict):
         return {**fig, "layout": dict(fig.get("layout") or {})}
     raise TypeError(
         f"shiny-plotly expects a plotly go.Figure (or its dict), got {type(fig).__name__}"
     )
+
+
+def encode_figure_arrays(fig_dict: dict[str, Any], *, sampled_traces: Iterable[str] = ()) -> None:
+    """Apply Plotly's figure array encoding after sampling, when the version supports it."""
+    # Plotly exposes no public raw-array Figure serializer or standalone typed-array
+    # encoder. Reuse exactly the conversion its Figure.to_dict() calls, rather than
+    # reconstructing and revalidating a Figure or duplicating dtype/shape rules. Plotly
+    # 5 has no binary conversion; its JSON encoder already handles native arrays.
+    convert = getattr(plotly_utils, "convert_to_base64", None)
+    if convert is not None:
+        # Samples already used native arrays before this optimization; leave their
+        # encoding unchanged. Whole traces, layout arrays and frames retain Plotly's
+        # compact binary representation. The wrapper shares their copied properties.
+        sampled = set(sampled_traces)
+        convert(
+            {
+                **fig_dict,
+                "data": [
+                    trace for i, trace in enumerate(fig_dict["data"]) if str(i) not in sampled
+                ],
+            }
+        )
 
 
 def fill_in_margins(fig_dict: dict[str, Any]) -> None:

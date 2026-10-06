@@ -7,6 +7,7 @@ from typing import Any
 
 import plotly.io as pio
 from htmltools import Tag, css, tags
+from plotly.basedatatypes import BaseFigure
 from plotly.io.json import to_json_plotly
 from shiny.module import resolve_id
 from shiny.render.renderer import Jsonifiable, Renderer, ValueFn
@@ -14,7 +15,7 @@ from shiny.session import Session, get_current_session
 from shiny.ui.fill import as_fill_item, as_fillable_container
 
 from ._deps import plotly_js, shiny_plotly_js
-from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, fill_in_margins
+from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, encode_figure_arrays, fill_in_margins
 from ._serve import enable_compressed_plotly_js
 from ._validate import as_positive_int
 from ._views import output_view
@@ -417,12 +418,16 @@ class render_plotly(Renderer[Figure]):
         }
 
     async def transform(self, value: Figure) -> Jsonifiable:
-        fig_dict = as_fig_dict(value)
+        fig_dict = as_fig_dict(value, preserve_arrays=self.resample is not None)
         if self.figurewidget_margins:
             fill_in_margins(fig_dict)
         resampled = None
         if self.resample is not None:
             fig_dict, resampled = await self._resample(fig_dict)
+            if isinstance(value, BaseFigure):
+                encode_figure_arrays(
+                    fig_dict, sampled_traces=() if resampled is None else resampled["index_maps"]
+                )
         themes_json, theme_keys = self._themes_json, None
         if self._theme_templates:
             # The browser picks the mode's template; the one the figure baked in at
