@@ -163,6 +163,90 @@ def reference_sample(y: np.ndarray, budget: int, connectgaps: bool) -> list[int]
     return sorted(kept)
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"frames": [{"data": [{"y": [5, 6]}]}]},
+        {"layout": {"updatemenus": [{"buttons": [{"args": [{"y": [[5, 6]]}]}]}]}},
+        {"layout": {"updatemenus": [{"buttons": [{"method": "update"}]}]}},
+        {"layout": {"sliders": [{"steps": [{"method": "animate"}]}]}},
+    ],
+)
+def test_frames_and_local_data_controls_are_sent_whole_with_a_warning(extra):
+    trace = {"x": np.arange(5000), "y": np.arange(5000)}
+    figure = {"data": [trace], **extra}
+    with pytest.warns(UserWarning, match="local controls can replace its data"):
+        result, record = resample_figure(figure, 100)
+    assert result["data"][0] is trace
+    assert not record.series
+
+
+def test_local_relayout_and_skip_controls_do_not_disable_sampling():
+    figure = {
+        "data": [{"x": np.arange(5000), "y": np.arange(5000)}],
+        "layout": {
+            "updatemenus": [{"buttons": [{"method": "relayout", "args": [{"title": "Hi"}]}]}],
+            "sliders": [{"steps": [{"method": "skip"}]}],
+        },
+    }
+    _, record = resample_figure(figure, 100)
+    assert 0 in record.series
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"xaxis.type": "log"}, {"yaxis": {"type": "log"}}, {"xaxis.rangeslider": {}}, {"xaxis": None}],
+)
+@pytest.mark.parametrize("args_key", ["args", "args2"])
+@pytest.mark.parametrize("string_form", [False, True])
+def test_local_axis_controls_cannot_bypass_the_sampling_guard(changes, args_key, string_form):
+    args = [changes]
+    if string_form:
+        key, value = next(iter(changes.items()))
+        args = [key, value]
+    figure = {
+        "data": [{"x": np.arange(5000), "y": np.arange(5000)}],
+        "layout": {"sliders": [{"steps": [{"method": "relayout", args_key: args}]}]},
+    }
+    with pytest.warns(UserWarning, match="local controls can change its axis"):
+        _, record = resample_figure(figure, 100)
+    assert not record.series
+
+
+def test_local_zoom_controls_and_unrelated_axes_remain_sampled():
+    figure = {
+        "data": [{"x": np.arange(5000), "y": np.arange(5000)}],
+        "layout": {
+            "updatemenus": [
+                {
+                    "buttons": [
+                        {
+                            "method": "relayout",
+                            "args": [{"xaxis.range": [100, 200], "xaxis2.type": "log"}],
+                        }
+                    ]
+                }
+            ]
+        },
+    }
+    _, record = resample_figure(figure, 100)
+    assert 0 in record.series
+
+
+def test_string_form_rangeslider_control_is_sent_whole():
+    figure = {
+        "data": [{"x": np.arange(5000), "y": np.arange(5000)}],
+        "layout": {
+            "updatemenus": [
+                {"buttons": [{"method": "relayout", "args": ["xaxis.rangeslider.visible", True]}]}
+            ]
+        },
+    }
+    with pytest.warns(UserWarning, match="local controls can change its axis"):
+        _, record = resample_figure(figure, 100)
+    assert not record.series
+
+
 @pytest.mark.parametrize("kind", ["random", "ties", "gaps", "infinities", "all_gaps", "end_gaps"])
 @pytest.mark.parametrize("strides", ["contiguous", "column", "reversed"])
 def test_sampler_matches_bucket_oracle_and_preserves_readonly_input(kind, strides):

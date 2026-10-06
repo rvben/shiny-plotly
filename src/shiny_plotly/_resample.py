@@ -24,7 +24,7 @@ from shiny.module import ResolvedId
 from shiny.session import Session, session_context
 
 from ._extrema import ExtremaIndex
-from ._views import VIEW_INPUT_SUFFIX, output_view, per_point_attributes
+from ._views import VIEW_INPUT_SUFFIX, attribute_paths, output_view, per_point_attributes
 
 # Name of the in-place update method that carries a view's sample to the browser.
 RESAMPLE_METHOD = "resample"
@@ -351,6 +351,7 @@ def _check_trace(
     layout: Mapping[str, Any],
     fill_linked: set[tuple[str, str]],
     text_axes: set[str],
+    local_axis_paths: list[str],
 ) -> None:
     """Raise Ineligible when a sample of ``trace`` would draw something the data does not."""
     if trace.get("stackgroup"):
@@ -380,6 +381,14 @@ def _check_trace(
     slider = axis.get("rangeslider")
     if isinstance(slider, Mapping) and slider and slider.get("visible", True) is not False:
         raise Ineligible("its x axis has a rangeslider, which would show only the sample")
+    guarded = {
+        "xaxis" + subplot[0][1:]: {"type", "rangeslider"},
+        "yaxis" + subplot[1][1:]: {"type"},
+    }
+    for path in local_axis_paths:
+        head, _, rest = path.partition(".")
+        if head in guarded and (not rest or rest.split(".")[0] in guarded[head]):
+            raise Ineligible("local controls can change its axis type or rangeslider")
 
 
 def resample_figure(
@@ -396,6 +405,31 @@ def resample_figure(
     data = list(fig_dict.get("data") or [])
     layout = fig_dict.get("layout") or {}
     record = Record(budget=budget, trace_count=len(data))
+    # Plotly's own controls can replace data without the server's update guard. The
+    # sample and original-index maps would then describe a different trace entirely.
+    local_controls = [
+        item
+        for key, children in (("updatemenus", "buttons"), ("sliders", "steps"))
+        for control in layout.get(key, [])
+        for item in control.get(children, [])
+    ]
+    local_data = any(
+        item.get("method", "restyle") in ("restyle", "update", "animate") for item in local_controls
+    )
+    local_axis_paths = [
+        path
+        for item in local_controls
+        if item.get("method") == "relayout"
+        for args in (item.get("args"), item.get("args2"))
+        if isinstance(args, (list, tuple)) and args
+        for path in (
+            attribute_paths(args[0])
+            if isinstance(args[0], Mapping)
+            else attribute_paths({args[0]: None})
+            if isinstance(args[0], str)
+            else []
+        )
+    ]
     # plotly links a tonext fill to the previous trace of the same subplot, wherever it
     # sits in the figure, so every trace on such a subplot is a possible fill partner.
     fill_linked = {
@@ -411,7 +445,9 @@ def resample_figure(
             series = _series(trace, budget, log_y, owned_arrays=owned_arrays)
             if series is None:
                 continue
-            _check_trace(trace, layout, fill_linked, text_axes)
+            if fig_dict.get("frames") or local_data:
+                raise Ineligible("animation frames or local controls can replace its data")
+            _check_trace(trace, layout, fill_linked, text_axes, local_axis_paths)
             series.y_axis = _y_axis(trace)
         except Ineligible as reason:
             refused.append(f"trace {index} ({reason})")
