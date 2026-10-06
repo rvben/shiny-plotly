@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import datetime
 import math
+import sys
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -163,6 +164,34 @@ def axis_coordinates(x: np.ndarray, *, copy: bool = True) -> np.ndarray:
             raise Ineligible("x holds a missing date (NaT)")
         return x.astype("datetime64[us]").astype(np.int64) / 1000.0
     if x.dtype.kind == "O" and all(isinstance(v, (datetime.date, np.datetime64)) for v in x):
+        # Pandas is already loaded when an app supplies Timestamp objects. Do not
+        # import it just to sample stdlib dates, or make it a required dependency.
+        pandas = sys.modules.get("pandas")
+        if pandas is not None and not pandas.__version__.startswith(("0.", "1.")):
+            zone = getattr(x[0], "tzinfo", None) if len(x) else None
+            if (zone is None or type(zone) is datetime.timezone) and all(
+                getattr(value, "tzinfo", None) == zone for value in x
+            ):
+                local = x  # naive or a single fixed offset cannot normalize a DST gap
+            else:
+                # Strip each offset before pandas sees it. Even Timestamp can hold a
+                # nonexistent local time when built from a stdlib aware datetime.
+                local = [
+                    value.replace(tzinfo=None)
+                    if isinstance(value, datetime.datetime) and value.tzinfo is not None
+                    else value
+                    for value in x
+                ]
+            try:
+                dates = (
+                    pandas.DatetimeIndex(local).tz_localize(None).to_numpy(dtype="datetime64[us]")
+                )
+            except (TypeError, ValueError, OverflowError):
+                # Mixed timezones and dates outside pandas' range keep the existing
+                # element-wise wall-clock conversion, without UTC normalization.
+                pass
+            else:
+                return axis_coordinates(dates)
         return axis_coordinates(np.array([_wall_clock(v) for v in x], dtype="datetime64[us]"))
     raise Ineligible("x is not numbers or dates")
 

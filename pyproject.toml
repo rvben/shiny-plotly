@@ -64,6 +64,7 @@ dev = [
   "numpy>=1.26",
   "shinylive-check>=0.1.0",
   "pandas>=2",
+  "pytz>=2026.4",
 ]
 
 # uv's default cache keys for a local build are the metadata files only, so a source-only

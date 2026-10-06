@@ -491,7 +491,16 @@ def test_pandas_dates_with_a_timezone_are_placed_at_their_wall_clock():
     nine = datetime.datetime(2026, 6, 1, 9, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000
 
     for x in (index, pd.Series(index)):
-        _, record, warned = resampled(go.Figure(go.Scatter(x=x, y=np.arange(N, dtype=float))))
+        # Plotly 5.5 calls a deprecated pandas API when constructing a Series
+        # trace. Suppress that upstream warning only before our renderer runs.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="The behavior of DatetimeProperties.to_pydatetime is deprecated",
+                category=FutureWarning,
+            )
+            fig = go.Figure(go.Scatter(x=x, y=np.arange(N, dtype=float)))
+        _, record, warned = resampled(fig)
         assert warned == []
         assert record.series[0].coords[0] == nine
 
@@ -767,3 +776,106 @@ def test_as_array_reads_plotlys_binary_arrays_in_any_shape():
 
     assert np.array_equal(as_array(encoded), grid)
     assert np.array_equal(as_array(as_list_shape), grid)
+
+
+@pytest.mark.parametrize(
+    "dates",
+    [
+        [datetime.date(1000, 1, 1), datetime.date(3000, 1, 1)],
+        [datetime.datetime(1969, 12, 31, 23, 59, 59, 999999)],
+        [datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)],
+        [
+            datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone(datetime.timedelta(hours=2))),
+            datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone(datetime.timedelta(hours=-3))),
+        ],
+        [np.datetime64("1969-12-31T23:59:59.999999999"), np.datetime64("2026-01-01")],
+        [],
+    ],
+)
+def test_bulk_date_coordinates_match_the_no_pandas_wall_clock_path(dates):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from shiny_plotly._resample import axis_coordinates
+
+    x = np.array(dates, dtype=object)
+    with patch("shiny_plotly._resample.sys", SimpleNamespace(modules={})):
+        expected = axis_coordinates(x)
+    np.testing.assert_array_equal(axis_coordinates(x), expected)
+
+
+def test_bulk_pandas_dates_preserve_dst_wall_times_and_reject_missing_values():
+    from shiny_plotly._resample import Ineligible, axis_coordinates
+
+    pd = pytest.importorskip("pandas")
+    x = pd.date_range("2021-10-31 01:00", periods=6, freq="h", tz="Europe/Brussels").to_numpy()
+    expected = (
+        np.array(
+            [np.datetime64(v.replace(tzinfo=None), "us") for v in x], dtype="datetime64[us]"
+        ).astype(np.int64)
+        / 1000.0
+    )
+    np.testing.assert_array_equal(axis_coordinates(x), expected)
+    with pytest.raises(Ineligible, match="missing date"):
+        axis_coordinates(np.array([pd.Timestamp("2026-01-01"), pd.NaT], dtype=object))
+
+
+def test_pytz_dst_dates_match_elementwise_wall_clock_conversion():
+    from shiny_plotly._resample import axis_coordinates
+
+    pd = pytest.importorskip("pandas")
+    pytz = pytest.importorskip("pytz")
+    x = pd.date_range(
+        "2021-10-31 01:00", periods=6, freq="h", tz=pytz.timezone("Europe/Brussels")
+    ).to_numpy()
+    expected = np.array([np.datetime64(v.replace(tzinfo=None), "us") for v in x])
+    np.testing.assert_array_equal(axis_coordinates(x), expected.astype(np.int64) / 1000.0)
+
+
+def test_old_pandas_and_custom_timezones_keep_the_elementwise_path(monkeypatch):
+    from shiny_plotly._resample import axis_coordinates
+
+    pd = pytest.importorskip("pandas")
+    monkeypatch.setattr(pd, "__version__", "1.5.3")
+    assert axis_coordinates(np.array([datetime.date(2026, 1, 1)], dtype=object))[0] > 0
+    monkeypatch.setattr(pd, "__version__", "2.0.0")
+
+    class CustomZone(datetime.tzinfo):
+        def utcoffset(self, dt):
+            return datetime.timedelta(hours=2)
+
+        def dst(self, dt):
+            return datetime.timedelta(0)
+
+    x = np.array([datetime.datetime(2026, 1, 1, tzinfo=CustomZone())], dtype=object)
+    expected = axis_coordinates(np.array([np.datetime64("2026-01-01")]))
+    np.testing.assert_array_equal(axis_coordinates(x), expected)
+
+
+def test_bulk_dates_preserve_nonexistent_wall_times_even_in_timestamp_objects():
+    from zoneinfo import ZoneInfo
+
+    from shiny_plotly._resample import axis_coordinates
+
+    pd = pytest.importorskip("pandas")
+    pytz = pytest.importorskip("pytz")
+    for zone in (ZoneInfo("Europe/Brussels"), pytz.timezone("Europe/Brussels")):
+        dates = [datetime.datetime(2026, 3, 29, h, 30, tzinfo=zone) for h in (1, 2, 3)]
+        for x in (dates, [pd.Timestamp(v) for v in dates]):
+            expected = (
+                np.array([np.datetime64(v.replace(tzinfo=None), "us") for v in x]).astype(np.int64)
+                / 1000
+            )
+            np.testing.assert_array_equal(axis_coordinates(np.array(x, dtype=object)), expected)
+
+
+def test_unrepresentable_bulk_dates_fall_back_to_the_numpy_conversion(monkeypatch):
+    from shiny_plotly._resample import axis_coordinates
+
+    pd = pytest.importorskip("pandas")
+
+    def reject(*args, **kwargs):
+        raise ValueError("not representable")
+
+    monkeypatch.setattr(pd, "DatetimeIndex", reject)
+    assert axis_coordinates(np.array([datetime.date(2026, 1, 1)], dtype=object))[0] > 0

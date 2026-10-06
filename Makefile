@@ -56,7 +56,7 @@ build:
 check-wheel: build
 	rm -rf .wheel-venv
 	uv venv --quiet .wheel-venv
-	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2 numpy pandas
+	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2 numpy pandas pytz
 	.wheel-venv/bin/python -c "import shiny_plotly; print('shiny_plotly', shiny_plotly.__version__)"
 	cd tests && ../.wheel-venv/bin/python -m pytest -q -rs -p no:cacheprovider --ignore=browser \
 		--rootdir=.. -c ../pyproject.toml .
@@ -66,14 +66,15 @@ check-wheel: build
 # allows (uv's lowest-direct resolution: plotly, shiny, htmltools at their floor, the rest
 # as resolved from there) into a throwaway venv and runs the whole suite, browser included,
 # so the declared bounds are tested rather than hoped. The test tools are installed in a
-# second step at their current versions; none of them depends on the three. Needs
+# second step separately; pandas 2/pytz exercises the older timestamp representation
+# alongside the normal suite's pandas 3. None depends on the three. Needs
 # Chromium for that venv's playwright, which the target installs.
 check-floor:
 	rm -rf .floor-venv
 	uv venv --quiet .floor-venv
 	uv pip install --quiet --python .floor-venv/bin/python --resolution lowest-direct .
 	uv pip install --quiet --python .floor-venv/bin/python pytest httpx2 \
-		pytest-playwright numpy pandas
+		pytest-playwright numpy "pandas>=2,<3" pytz
 	.floor-venv/bin/python -c "import plotly, shiny, htmltools; \
 		print('plotly', plotly.__version__, 'shiny', shiny.__version__, 'htmltools', htmltools.__version__)"
 	.floor-venv/bin/python -m playwright install $(PLAYWRIGHT_ARGS) chromium

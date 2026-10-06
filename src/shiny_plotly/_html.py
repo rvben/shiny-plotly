@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from plotly.basedatatypes import BaseFigure
 
 from ._deps import plotly_js, shiny_plotly_js
 from ._serve import enable_for_current_session
+from ._snapshot import snapshot
 
 __all__ = ("FIGUREWIDGET_MARGINS", "fig_to_ui")
 
@@ -115,16 +117,18 @@ def as_fig_dict(fig: Figure, *, preserve_arrays: bool = False) -> dict[str, Any]
     # validate=False and never reconstructs a Figure from it.
     if isinstance(fig, BaseFigure):
         if preserve_arrays:
+            if type(fig).to_dict is not BaseFigure.to_dict:
+                return deepcopy(fig.to_dict())  # respect custom Figure serializers
             # Figure.to_dict() encodes full numpy arrays as base64 in plotly 6. A
             # sampler would immediately decode them again. The public component
             # serializers copy the same properties while retaining native arrays,
             # so sampling can run before encoding anything sent to the browser.
             result = {
-                "data": [trace.to_plotly_json() for trace in cast(Any, fig).data],
-                "layout": fig.layout.to_plotly_json(),
+                "data": [snapshot(trace) for trace in cast(Any, fig).data],
+                "layout": snapshot(fig.layout),
             }
             if fig.frames:
-                result["frames"] = [frame.to_plotly_json() for frame in fig.frames]
+                result["frames"] = [snapshot(frame) for frame in fig.frames]
             return result
         return fig.to_dict()
     if isinstance(fig, dict):
@@ -142,9 +146,9 @@ def encode_figure_arrays(fig_dict: dict[str, Any], *, sampled_traces: Iterable[s
     # 5 has no binary conversion; its JSON encoder already handles native arrays.
     convert = getattr(plotly_utils, "convert_to_base64", None)
     if convert is not None:
-        # Samples already used native arrays before this optimization; leave their
-        # encoding unchanged. Whole traces, layout arrays and frames retain Plotly's
-        # compact binary representation. The wrapper shares their copied properties.
+        # Keep sampled trace encoding unchanged. Whole traces, layout arrays and
+        # frames retain Plotly's compact binary representation. The wrapper shares
+        # their copied properties.
         sampled = set(sampled_traces)
         convert(
             {
