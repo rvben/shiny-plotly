@@ -51,4 +51,5 @@ def shiny_plotly_js() -> HTMLDependency:
         version=__version__,
         source={"package": "shiny_plotly", "subdir": "www"},
         script={"src": "shiny-plotly.js"},
+        stylesheet={"href": "shiny-plotly.css"},
     )

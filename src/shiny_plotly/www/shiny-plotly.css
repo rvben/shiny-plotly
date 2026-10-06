@@ -1,0 +1,5 @@
+/* Zero specificity lets app styles override the delayed stale indicator. */
+:where(.shiny-plotly-output.shiny-plotly-stale) {
+  opacity: 0.3;
+  transition: opacity 250ms ease 500ms;
+}

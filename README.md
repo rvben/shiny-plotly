@@ -203,6 +203,27 @@ Drawing a plotly figure costs the browser a fixed amount of main-thread work per
 
 The lever is drawing fewer charts at once, and Shiny pulls it for you: an output the browser reports as hidden is suspended, so its figure is not rendered at all until it is shown. That covers every container that hides one, whether an inactive panel of `ui.navset_tab`, `ui.navset_card_tab`, `ui.navset_pill` or `ui.navset_hidden`, a closed `ui.accordion` section, or a `ui.panel_conditional` whose condition is false (that last one from Shiny 1.6.1 on; older Shiny drew it at load); each panel then pays only for its own charts, and pays when it is opened. Scrolling is not hiding, though: a chart 3000px down the page is visible as far as the browser is concerned, and is drawn with the rest at load. Charts that must all be visible at once are better served by fewer, denser figures (subplots in one graph div) than by many small ones.
 
+A shared input on a long page can also redraw every chart on every change. Opt in to postpone browser redraws of charts more than 200px outside the viewport:
+
+```python
+output_plotly("sales", defer_offscreen=True)
+```
+
+An already drawn graph keeps its previous figure while it waits. The latest waiting figure replaces earlier ones, including their queued updates. Updates sent after that figure apply in order after its redraw. Waiting figures draw one at a time during browser idle periods (with a one-second idle timeout, or a timer fallback). Scrolling near an output, pointer entry, and keyboard focus bring its redraw forward. A draw already started completes before another figure for the same output draws.
+
+First draws, empty values, and server errors are never deferred. The server still renders every figure; this option moves off-screen browser drawing out of the immediate response to an input change. Visibility is measured against the viewport, rather than clipping inside a scrolling card. It does not make an individual Plotly redraw interruptible, and background work can still occupy the main thread.
+
+A waiting output carries `shiny-plotly-stale` until its redraw and queued updates finish. It dims after half a second, using a zero-specificity CSS rule. Override it in your app to change the indicator, for example `.shiny-plotly-stale { opacity: 1; }`.
+
+Code that reads graph data, such as a button exporting all charts, must first await `window.shinyPlotly.flush()`. For opted-in outputs, it draws waiting figures, waits for redraws already running, and resolves after their queued updates and resizing finish. It rejects if drawing or an update fails; a new figure clears that failure. For a complete snapshot before programmatic printing:
+
+```js
+await window.shinyPlotly.flush();
+window.print();
+```
+
+Native print requests also start a refresh, but browsers do not wait for promises returned by `beforeprint` listeners, so asynchronous drawing may finish after the printed snapshot is taken.
+
 ### Dark mode
 
 Plotly does not follow Bootstrap's color mode by itself. `theme="auto"` makes the figure follow it in the browser, with no server round-trip:

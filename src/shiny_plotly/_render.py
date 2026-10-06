@@ -152,7 +152,13 @@ def normalize_resample(value: int | None) -> int | None:
     return budget
 
 
-def output_plotly(id: str, *, width: str | None = None, height: str | None = None) -> Tag:
+def output_plotly(
+    id: str,
+    *,
+    width: str | None = None,
+    height: str | None = None,
+    defer_offscreen: bool = False,
+) -> Tag:
     """
     Placeholder for a :func:`render_plotly` output. A drop-in for ``output_widget(id)``.
 
@@ -165,6 +171,16 @@ def output_plotly(id: str, *, width: str | None = None, height: str | None = Non
     It is fill-aware: inside ``ui.card(full_screen=True)`` or a fillable page the plot
     grows and shrinks with its container. Passing ``height`` fixes the output's height
     instead (the plot fills that height), the same rule ``output_widget`` follows.
+
+    With ``defer_offscreen=True``, an already drawn graph more than 200px outside the
+    viewport keeps its previous figure until the browser is idle or the output comes
+    near the viewport, receives pointer entry or receives focus. Only the latest waiting
+    figure is drawn, with its subsequent updates in order. First draws, empty values and
+    errors are never deferred. A waiting output carries ``shiny-plotly-stale``, dimmed
+    after half a second. Code that reads graph data awaits ``window.shinyPlotly.flush()``;
+    it also awaits draws already started and rejects if drawing fails. Before printing
+    programmatically, await that promise before calling ``window.print()``. Native print
+    requests start a best-effort refresh without waiting for asynchronous drawing.
     """
     tag = tags.div(
         plotly_js(),
@@ -172,6 +188,7 @@ def output_plotly(id: str, *, width: str | None = None, height: str | None = Non
         id=resolve_id(id),  # namespaced inside a module, like every Shiny output
         class_="shiny-plotly-output",
         style=css(width=width, height=height),
+        data_shiny_plotly_defer="" if defer_offscreen else None,
     )
     # The graph inside fills the output, so the output is a fillable container on every
     # page; these helpers bring the fill CSS, which a plain page does not carry by itself.

@@ -821,3 +821,48 @@ def make_resample_app() -> App:
             return json.dumps(input.clicks_click()["points"][0])
 
     return App(app_ui, server)
+
+
+def make_defer_app() -> App:
+    """An on-screen chart and three below the fold, sharing an input."""
+    app_ui = ui.page_fluid(
+        ui.input_dark_mode(id="mode", mode="light"),
+        ui.input_numeric("n", "Bars", value=3),
+        ui.input_switch("fail", "Fail", value=False),
+        ui.input_switch("hide", "Hide", value=False),
+        ui.input_action_button("tick", "tick"),
+        output_plotly("near", height="150px", defer_offscreen=True),
+        ui.div(style="height: 3000px"),
+        output_plotly("far", height="150px", defer_offscreen=True),
+        output_plotly("far_next", height="150px", defer_offscreen=True),
+        output_plotly("far_plain", height="150px"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly
+        def near():
+            return bars(input.n())
+
+        @render_plotly(theme="auto")
+        def far():
+            if input.fail():
+                raise ValueError("the figure failed on purpose")
+            if input.hide():
+                return None
+            return bars(input.n())
+
+        @render_plotly
+        def far_next():
+            return bars(input.n())
+
+        @render_plotly(theme="auto")
+        def far_plain():
+            return bars(input.n())
+
+        @reactive.effect
+        @reactive.event(input.tick)
+        async def _tick():
+            await extend_traces("far", {"y": [[99]]}, indices=0)
+            await extend_traces("far_plain", {"y": [[99]]}, indices=0)
+
+    return App(app_ui, server)

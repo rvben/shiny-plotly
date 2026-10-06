@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `output_plotly(defer_offscreen=True)` postpones redraws of already drawn graphs more than 200px outside the viewport. Waiting figures draw one at a time when the browser is idle, or sooner on scrolling near, pointer entry, or focus. Only the latest waiting figure and its subsequent updates are retained. Waiting outputs carry an overridable, delayed `shiny-plotly-stale` indicator. First draws, empty values, and errors are not deferred. Off by default.
+- `window.shinyPlotly.flush()` draws waiting figures and awaits active redraws, queued updates, and resizing. It rejects on failure, letting export and programmatic printing code await a complete snapshot. Native printing starts a best-effort refresh.
+
 - `render_plotly(resample=N)` draws long `scatter` and `scattergl` traces as a sample of at most N points and keeps the full data in the session on the server. Each zoom or pan redraws the visible range from the full data, so the detail is there at every zoom while the page receives a few thousand points instead of millions. The sample is the minimum and maximum of equal-width buckets, both ends and every gap, so spikes survive and gaps are never bridged. Point events report positions in the full data, and per-point attributes such as `customdata` and `marker.color` are sliced with the points. A trace that cannot be sampled faithfully is sent whole, with a warning saying why, and in-place updates that would put the data and the drawn sample out of step raise `ValueError`. Needs numpy: `pip install shiny-plotly[resample]`.
 
 ## [0.4.3](https://github.com/rvben/shiny-plotly/compare/v0.4.2...v0.4.3) - 2026-09-25

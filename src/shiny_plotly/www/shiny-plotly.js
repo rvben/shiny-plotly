@@ -33,6 +33,9 @@
       var gd = entries[i].target;
       if (!gd.isConnected) {
         observer.unobserve(gd);
+        if (gd._shinyPlotlyOutput && !gd._shinyPlotlyOutput.isConnected) {
+          cancelDeferred(gd._shinyPlotlyOutput);
+        }
         forget(gd);
         if (window.Plotly) window.Plotly.purge(gd);
         continue;
@@ -40,6 +43,8 @@
       var rect = entries[i].contentRect;
       var layout = gd._fullLayout;
       if (!layout || (rect.width === 0 && rect.height === 0)) continue;
+      if (gd._shinyPlotlyOutput &&
+          gd._shinyPlotlyOutput.classList.contains("shiny-plotly-stale")) continue;
       if (differs(rect.width, layout.width) || differs(rect.height, layout.height)) {
         window.Plotly.Plots.resize(gd);
       }
@@ -369,6 +374,236 @@
     return window.Plotly.restyle(gd, update, indices);
   }
 
+  // --- off-screen deferral -------------------------------------------------------------
+  // Each figure owns its updates. A waiting figure can be replaced; an active draw cannot
+  // be interrupted, so its successor waits for it. flush also waits for these active draws.
+  var DEFER_MARGIN_PX = 200;
+  var deferredOutputs = new Set();
+  var viewWatcher = null;
+  var removalWatcher = null;
+  var drainScheduled = false;
+  var drainRunning = false;
+  var viewScheduled = false;
+
+  // ResizeObserver only tracks successfully drawn graphs. Watch removal while work or a
+  // failure is retained too, including a first draw that has not yet installed its tracker.
+  function rememberDeferred(el) {
+    var first = deferredOutputs.size === 0;
+    deferredOutputs.add(el);
+    if (!first) return;
+    if (removalWatcher === null) {
+      removalWatcher = new MutationObserver(function () {
+        Array.from(deferredOutputs).forEach(function (output) {
+          if (output.isConnected) return;
+          cancelDeferred(output);
+          var gd = graphDiv(output);
+          if (gd) release(gd);
+        });
+      });
+    }
+    removalWatcher.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function forgetDeferred(el) {
+    deferredOutputs.delete(el);
+    if (deferredOutputs.size === 0 && removalWatcher) removalWatcher.disconnect();
+  }
+
+  function deferrable(el) {
+    var gd = graphDiv(el);
+    if (!gd || !gd._shinyPlotlyDrawn) return false;
+    var rect = el.getBoundingClientRect();
+    var height = window.innerHeight || document.documentElement.clientHeight;
+    var width = window.innerWidth || document.documentElement.clientWidth;
+    return rect.bottom < -DEFER_MARGIN_PX || rect.top > height + DEFER_MARGIN_PX ||
+      rect.right < -DEFER_MARGIN_PX || rect.left > width + DEFER_MARGIN_PX;
+  }
+
+  function deferredState(el) {
+    if (!el._shinyPlotlyDeferred) {
+      el._shinyPlotlyDeferred = { waiting: null, active: null, error: null };
+      el.addEventListener("pointerenter", function () { drawNear(el, true); });
+      el.addEventListener("focusin", function () { drawNear(el, true); });
+    }
+    return el._shinyPlotlyDeferred;
+  }
+
+  function stopWatching(el) {
+    if (viewWatcher) viewWatcher.unobserve(el);
+  }
+
+  function cancelDeferred(el) {
+    var state = el._shinyPlotlyDeferred;
+    if (!state) return;
+    if (state.active) {
+      state.active.cancelled = true;
+      state.active._shinyPlotlyPending = null;
+      // The graph is being removed. A fresh first draw gets a new graph div and need not
+      // wait for Plotly to finish work on the detached one.
+      state.active = null;
+    }
+    state.waiting = null;
+    state.error = null;
+    stopWatching(el);
+    forgetDeferred(el);
+    el.classList.remove("shiny-plotly-stale");
+  }
+
+  function reportDraw(el, promise) {
+    promise.catch(function (err) {
+      console.error("shiny-plotly: deferred draw of '" + el.id + "' failed:", err);
+    });
+  }
+
+  function drawNear(el, force) {
+    if (!el.isConnected) { cancelDeferred(el); return; }
+    var state = el._shinyPlotlyDeferred;
+    if (!state || !state.waiting || (!force && deferrable(el))) return;
+    state.waiting.ready = true;
+    stopWatching(el);
+    reportDraw(el, settleDeferred(el, false));
+  }
+
+  function watchWaiting(el) {
+    if (viewWatcher === null && typeof IntersectionObserver === "function") {
+      viewWatcher = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) { drawNear(entry.target, false); });
+      }, { rootMargin: DEFER_MARGIN_PX + "px" });
+    }
+    if (viewWatcher) viewWatcher.observe(el);
+  }
+
+  // IntersectionObserver clips against scrolling ancestors. Also check viewport bounds
+  // on scroll/resize, so eligibility and promotion use the same viewport-only rule.
+  function checkDeferredView() {
+    if (viewScheduled || deferredOutputs.size === 0) return;
+    viewScheduled = true;
+    window.requestAnimationFrame(function () {
+      viewScheduled = false;
+      Array.from(deferredOutputs).forEach(function (el) { drawNear(el, false); });
+    });
+  }
+
+  function finishDeferred(el, job, err) {
+    var state = el._shinyPlotlyDeferred;
+    if (state.active !== job) return;
+    state.active = null;
+    if (err && !job.cancelled && !state.waiting) state.error = err;
+    if (!state.waiting && !state.error) {
+      forgetDeferred(el);
+      el.classList.remove("shiny-plotly-stale");
+    }
+    scheduleDrain();
+  }
+
+  function startDeferred(el) {
+    var state = el._shinyPlotlyDeferred;
+    var job = state.waiting;
+    state.waiting = null;
+    state.active = job;
+    // Move this output behind the others so a frequently updated chart cannot starve them.
+    deferredOutputs.delete(el);
+    deferredOutputs.add(el);
+    stopWatching(el);
+    // Keep active set through the draw, the updates and the final resize. New messages
+    // continue to queue on this job, never on a graph that is still being replaced.
+    function finishUpdates() {
+      if (job.cancelled || !el.isConnected) return Promise.resolve();
+      return applyPending(job, graphDiv(el), function () {
+        return !job.cancelled && el.isConnected;
+      }).then(function () {
+        if (job.cancelled || !el.isConnected) return;
+        if (job._shinyPlotlyPending) return finishUpdates();
+        var gd = graphDiv(el);
+        return retheme(gd).then(function () {
+          if (job.cancelled || !el.isConnected) return;
+          if (gd._fullLayout && (differs(gd.clientWidth, gd._fullLayout.width) ||
+              differs(gd.clientHeight, gd._fullLayout.height))) {
+            return window.Plotly.Plots.resize(gd);
+          }
+        }).then(function () {
+          if (job._shinyPlotlyPending) return finishUpdates();
+        });
+      });
+    }
+    job.promise = Promise.resolve().then(function () {
+      if (job.cancelled || !el.isConnected) return;
+      return draw(el, job.value);
+    }).then(finishUpdates).then(function () {
+      finishDeferred(el, job, null);
+    }, function (err) {
+      finishDeferred(el, job, err);
+      if (!job.cancelled) throw err;
+    });
+    return job.promise;
+  }
+
+  function settleDeferred(el, force) {
+    if (!el.isConnected) { cancelDeferred(el); return Promise.resolve(); }
+    var state = el._shinyPlotlyDeferred;
+    if (!state) return Promise.resolve();
+    if (force && state.waiting) state.waiting.ready = true;
+    if (state.active) {
+      return state.active.promise.then(function () { return settleDeferred(el, force); });
+    }
+    if (state.waiting && state.waiting.ready) {
+      return startDeferred(el).then(function () { return settleDeferred(el, force); });
+    }
+    if (state.error) return Promise.reject(state.error);
+    return Promise.resolve();
+  }
+
+  function renderDeferred(el, value) {
+    var state = deferredState(el);
+    state.error = null;
+    // Replacing a waiting figure drops its updates. Updates belonging to a draw already
+    // started finish with that draw; the replacement then overwrites them normally.
+    var pending = !state.waiting && !state.active ? el._shinyPlotlyPending : null;
+    el._shinyPlotlyPending = null;
+    state.waiting = { value: value, ready: !deferrable(el),
+      cancelled: false, _shinyPlotlyPending: pending };
+    rememberDeferred(el);
+    if (state.waiting.ready) return settleDeferred(el, false);
+    el.classList.add("shiny-plotly-stale");
+    watchWaiting(el);
+    scheduleDrain();
+  }
+
+  // One background draw at a time, even when another value arrives during an idle draw.
+  // A timeout ensures progress on busy pages; a timer supplies the same behavior in Safari.
+  function scheduleDrain() {
+    if (drainScheduled || drainRunning) return;
+    var candidate = Array.from(deferredOutputs).some(function (el) {
+      var state = el._shinyPlotlyDeferred;
+      return state.waiting && !state.active;
+    });
+    if (!candidate) return;
+    drainScheduled = true;
+    var callback = function () {
+      drainScheduled = false;
+      var el = Array.from(deferredOutputs).find(function (output) {
+        var state = output._shinyPlotlyDeferred;
+        return state.waiting && !state.active;
+      });
+      if (!el) return;
+      if (!el.isConnected) { cancelDeferred(el); scheduleDrain(); return; }
+      drainRunning = true;
+      el._shinyPlotlyDeferred.waiting.ready = true;
+      var promise = startDeferred(el);
+      reportDraw(el, promise);
+      function next() { drainRunning = false; scheduleDrain(); }
+      promise.then(next, next);
+    };
+    if (window.requestIdleCallback) window.requestIdleCallback(callback, { timeout: 1000 });
+    else setTimeout(callback, 50);
+  }
+
+  function flushDeferred() {
+    return Promise.all(Array.from(deferredOutputs).map(function (el) {
+      return settleDeferred(el, true);
+    })).then(function () {});
+  }
+
   // --- the output binding -------------------------------------------------------------
 
   function graphDiv(el) {
@@ -390,6 +625,7 @@
     container.style.width = value.width || "100%";
     var gd = document.createElement("div");
     gd.id = el.id + "-plotly";
+    gd._shinyPlotlyOutput = el;
     gd.className = "plotly-graph-div";
     gd.style.height = "100%";
     gd.style.width = "100%";
@@ -440,11 +676,13 @@
     if (redraw) {
       // The retheme covers a mode that flipped while the draw was in flight.
       return window.Plotly.react(gd, figure).then(function () {
+        if (!gd.isConnected || graphDiv(el) !== gd) { release(gd); return; }
         afterSampledDraw(gd);
         return retheme(gd);
       });
     }
     return window.Plotly.newPlot(gd, figure).then(function () {
+      if (!gd.isConnected || graphDiv(el) !== gd) { release(gd); return; }
       track(gd);
       watchView(gd, el.id);
       if (value.events && value.events.length) {
@@ -586,11 +824,13 @@
     return window.Plotly[update.method].apply(window.Plotly, [gd].concat(args));
   }
 
-  function applyPending(el, gd) {
+  function applyPending(el, gd, current) {
     var queue = el._shinyPlotlyPending || [];
     el._shinyPlotlyPending = null;
     return queue.reduce(function (chain, update) {
-      return chain.then(function () { return applyUpdate(gd, update); });
+      return chain.then(function () {
+        if (!current || current()) return applyUpdate(gd, update);
+      });
     }, Promise.resolve());
   }
 
@@ -600,6 +840,13 @@
       console.warn("shiny-plotly: " + update.method + " for '" + update.id + "' dropped: no such output on the page");
       return;
     }
+    var state = el._shinyPlotlyDeferred;
+    if (state && state.waiting) { hold(state.waiting, update); return; }
+    if (state && state.active && !state.active.cancelled) {
+      hold(state.active, update);
+      return;
+    }
+    if (state && state.error) { hold(el, update); return; }
     var gd = graphDiv(el);
     if (gd && gd._shinyPlotlyDrawn) {
       applyUpdate(gd, { method: update.method, args: JSON.parse(update.args) });
@@ -615,6 +862,9 @@
       return window.jQuery(scope).find(".shiny-plotly-output");
     };
     binding.renderValue = function (el, value) {
+      if (value !== null && value !== undefined &&
+          el.hasAttribute("data-shiny-plotly-defer")) return renderDeferred(el, value);
+      cancelDeferred(el);
       return draw(el, value);
     };
     // Shiny's default renderError writes the message over the output's children, which
@@ -622,6 +872,7 @@
     // default so Shiny's error styling applies.
     binding.renderError = function (el, err) {
       this.clearError(el);
+      cancelDeferred(el);
       clear(el);
       if (err.message === "") return;
       el.classList.add("shiny-output-error");
@@ -634,12 +885,21 @@
     window.Shiny.outputBindings.register(binding, "shiny-plotly.output");
     window.Shiny.addCustomMessageHandler("shiny-plotly", onUpdate);
     window.Shiny.addCustomMessageHandler("shiny-plotly-template", onTemplates);
+    window.addEventListener("scroll", checkDeferredView, { capture: true, passive: true });
+    window.addEventListener("resize", checkDeferredView);
+    // Native print events cannot await a promise. Start a best-effort refresh; callers
+    // needing a complete printed snapshot await flush() before invoking window.print().
+    window.addEventListener("beforeprint", function () {
+      reportDraw({ id: "beforeprint" }, flushDeferred());
+    });
     return true;
   }
 
   window.shinyPlotly = {
     // Called from a fig_to_ui fragment right after Plotly.newPlot resolves.
-    track: track
+    track: track,
+    // Resolves after waiting and active figures, their updates and resizing finish.
+    flush: flushDeferred
   };
 
   if (!register()) {
