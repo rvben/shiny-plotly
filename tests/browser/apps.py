@@ -763,6 +763,7 @@ def make_resample_app() -> App:
     """
     app_ui = ui.page_fluid(
         ui.input_action_button("rerender", "re-render"),
+        ui.input_switch("large_data", "Million-point traces", value=False),
         ui.output_text("reports"),
         ui.output_text("click_out"),
         output_plotly("big", height="300px", width="600px"),
@@ -786,13 +787,14 @@ def make_resample_app() -> App:
         @render_plotly(resample=RESAMPLE_BUDGET)
         def big():
             offset = 1000.0 * input.rerender()
-            x = np.arange(BIG)
+            n = 1_100_003 if input.large_data() else BIG
+            x = np.arange(n)
             y = np.sin(x / 500.0) + offset
             y[SPIKE_AT] = offset + 50.0
             fig = go.Figure(
                 [
                     go.Scattergl(x=x, y=y, customdata=x, name="long"),
-                    go.Scattergl(x=[0, BIG - 1], y=[offset, offset], name="short"),
+                    go.Scattergl(x=[0, n - 1], y=[offset, offset], name="short"),
                     go.Scattergl(x=x, y=np.cos(x / 500.0) + offset, name="second"),
                 ]
             )

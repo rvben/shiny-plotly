@@ -23,6 +23,7 @@ from shiny import reactive
 from shiny.module import ResolvedId
 from shiny.session import Session, session_context
 
+from ._extrema import ExtremaIndex
 from ._views import VIEW_INPUT_SUFFIX, output_view, per_point_attributes
 
 # Name of the in-place update method that carries a view's sample to the browser.
@@ -218,6 +219,9 @@ class Series:
     connectgaps: bool
     selected: np.ndarray | None
     y_axis: str = "y"
+    broad_views: int = 0
+    index_attempted: bool = False
+    extrema: ExtremaIndex | None = None
 
     def pick(self, budget: int, span: tuple[float, float] | None) -> np.ndarray:
         """The indices to draw for a view of ``span`` on the axis (``None``: everything),
@@ -227,6 +231,16 @@ class Series:
             lo, hi = min(span), max(span)
             start = max(int(np.searchsorted(self.coords, lo, side="left")) - 1, 0)
             stop = min(int(np.searchsorted(self.coords, hi, side="right")) + 1, stop)
+            # An index pays for itself only after repeated broad views. Keep first
+            # draws and narrow zooms on the direct sampler; a new render resets this
+            # state. Dense gaps decline the index and are not retried.
+            if stop - start >= max(1_000_000, budget * 1024):
+                self.broad_views += 1
+                if self.broad_views >= 3 and not self.index_attempted:
+                    self.index_attempted = True
+                    self.extrema = ExtremaIndex.build(self.y)
+                if self.extrema is not None:
+                    return self.extrema.pick(start, stop, budget, connectgaps=self.connectgaps)
         return start + sample(self.y[start:stop], budget, connectgaps=self.connectgaps)
 
     def attributes(self, kept: np.ndarray) -> dict[str, Any]:

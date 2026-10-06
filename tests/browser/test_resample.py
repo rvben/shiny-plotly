@@ -4,8 +4,12 @@ sample for every zoom, the overview again on reset, and nothing stale ever drawn
 import json
 from collections.abc import Iterator
 
+import numpy as np
 import pytest
 from playwright.sync_api import Page, expect
+
+from shiny_plotly._extrema import ExtremaIndex
+from shiny_plotly._resample import sample
 
 from .apps import BIG, RESAMPLE_BUDGET, SPIKE_AT
 
@@ -78,6 +82,31 @@ def test_a_wide_zoom_stays_within_the_budget(app: Page):
 
     wait_for_x(app, "big", 9_999, 60_001)
     assert len(drawn(app, "big", 0, "x")) <= RESAMPLE_BUDGET
+
+
+def test_repeated_broad_pans_use_the_index_and_draw_the_exact_sample(app: Page, monkeypatch):
+    n = 1_100_003
+    builds = []
+    build = ExtremaIndex.build
+
+    def counted(y):
+        builds.append(len(y))
+        return build(y)
+
+    monkeypatch.setattr(ExtremaIndex, "build", staticmethod(counted))
+    app.evaluate("Shiny.setInputValue('large_data', true)")
+    wait_for_x(app, "big", 0, n - 1)
+    x = np.arange(n)
+    y = np.sin(x / 500.0)
+    y[SPIKE_AT] = 50
+    for i in range(5):
+        first, last = 100 + i * 100, n - 100 - i * 100
+        relayout(app, "big", {"xaxis.range": [first, last]})
+        wait_for_x(app, "big", first - 1, last + 1)
+        kept = first - 1 + sample(y[first - 1 : last + 2], RESAMPLE_BUDGET)
+        assert drawn(app, "big", 0, "x") == kept.tolist()
+        assert drawn(app, "big", 0, "customdata") == kept.tolist()
+        assert len(builds) == (2 if i >= 2 else 0), "each long trace builds once"
 
 
 def test_resetting_the_view_draws_the_overview_again(app: Page):
