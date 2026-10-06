@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The sampler reduces finite data through array views and reuses one work buffer for data with gaps, reducing allocations while keeping the same points and gap boundaries.
 - Resampling reuses the renderer's owned float64 snapshots and checks sorted coordinates without allocating their differences. Caller-owned arrays and log-axis masking retain independent copies.
 - Repeated broad zooms and pans of very long traces build a small, exact extrema index lazily. Initial draws, narrow views, and densely gapped data retain the direct sampler; indexed views preserve the same spikes, ties, gaps, and point indices.
+- Fully missing long traces keep their endpoints without allocating extrema buffers or enumerating every gap.
 
 ## [0.4.3](https://github.com/rvben/shiny-plotly/compare/v0.4.2...v0.4.3) - 2026-09-25
 

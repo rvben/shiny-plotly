@@ -65,13 +65,17 @@ def sample(y: Any, budget: int, *, connectgaps: bool = False) -> np.ndarray:
     if n <= budget:
         return np.arange(n)
     finite = np.isfinite(y)
+    all_finite = bool(finite.all())
+    if not all_finite and not finite.any():
+        # Missing series have no extrema or gap boundaries to preserve between finite
+        # points. Retain the same endpoints without reductions or enumerating every gap.
+        return np.array([0, n - 1])
     interior = y[1:-1]
     # Equal buckets of `width` values: vectorised reductions instead of a Python loop
     # over buckets. Finite data needs no full-size work buffers or masked copies.
     width = -(-len(interior) // ((budget - 2) // 2))
     count = -(-len(interior) // width)
     rows = np.arange(count)
-    all_finite = bool(finite.all())
     if all_finite:
         # Full buckets are views; reduce the partial final bucket separately so it
         # needs no padding. argmin/argmax keep the first occurrence of tied extrema.

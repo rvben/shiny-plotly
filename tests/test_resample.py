@@ -106,6 +106,18 @@ def test_a_trace_that_is_all_gaps_samples_to_its_ends():
     assert sample(y, budget=10).tolist() == [0, 999]
 
 
+@pytest.mark.parametrize("connect", [False, True])
+@pytest.mark.parametrize("values", [[np.nan], [np.inf], [-np.inf], [np.nan, np.inf, -np.inf]])
+def test_fully_missing_series_keep_endpoints_without_mutating_readonly_values(values, connect):
+    y = np.resize(np.array(values), 1003)
+    y.flags.writeable = False
+    before = y.copy()
+
+    assert sample(y, 102, connectgaps=connect).tolist() == [0, 1002]
+    assert sample(y[:9], 10, connectgaps=connect).tolist() == list(range(9))
+    np.testing.assert_array_equal(y, before)
+
+
 def test_the_sample_draws_the_same_gaps_as_the_data():
     """Random gaps: every segment the sample draws is one the data draws, and every gap
     the data has between two kept points stays a gap."""
