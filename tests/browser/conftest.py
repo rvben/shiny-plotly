@@ -59,6 +59,7 @@ def server_url() -> Iterator[str]:
             Mount("/arrays", app=make_arrays_app()),
             Mount("/resample", app=make_resample_app()),
             Mount("/stream", app=load_example("streaming_app.py")),
+            Mount("/many", app=load_example("many_traces_app.py")),
             Mount("/demo", app=load_example("shinylive/app.py")),
             Mount("/", app=make_app()),
         ]

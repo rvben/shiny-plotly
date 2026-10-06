@@ -388,6 +388,8 @@ def scatter(): ...
 
 ### Live updates without a re-render
 
+For figures with many traces, use an explicit update when only some series change. [The many-trace example](examples/many_traces_app.py) draws once, then calls `update()` with one trace’s y values and a new title in one redraw. Unchanged traces stay in the browser, and a user’s zoom is preserved. `make bench-updates` compares this path with a full re-render on a pinned 505-trace stock dataset; [benchmark instructions](bench/README.md) describe setup and measurement boundaries. Resampled traces still require a re-render when their data changes.
+
 A re-render sends the whole figure. For a stream of points, a colour change or a new title, send just the change: `extend_traces`, `prepend_traces`, `add_traces`, `delete_traces`, `restyle`, `relayout` and `update` call the plotly.js functions of the same names on the graph an output holds. All of them are coroutines, so the effect that calls them is `async def`.
 
 ```python

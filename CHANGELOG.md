@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resampling converts object timestamps in bulk when pandas 2 or newer is already loaded, retaining Plotly's wall-clock date semantics, including mixed offsets and nonexistent DST times. Unsupported dates keep the element-wise fallback.
 - Owned figure snapshots avoid reconstructing immutable date elements, while keeping array/list buffers, mutable custom data, date subclasses and custom timezone state independently copied. pandas remains optional.
 
+### Added
+
+- A many-trace example using explicit targeted updates, plus checksum-pinned real-world server benchmarks and a browser comparison of targeted updates against full re-renders. Downloaded fixtures and generated results stay outside the repository.
+
 ## [0.5.0](https://github.com/rvben/shiny-plotly/compare/v0.4.3...v0.5.0) - 2026-10-06
 
 ### Added
