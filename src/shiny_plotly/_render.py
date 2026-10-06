@@ -395,12 +395,14 @@ class render_plotly(Renderer[Figure]):
                 state.sampled = None
         return await super().render()
 
-    async def _resample(self, fig_dict: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+    async def _resample(
+        self, fig_dict: dict[str, Any], *, owned_arrays: bool
+    ) -> tuple[dict[str, Any], Any]:
         """The figure with long traces sampled, and what the browser needs to know of it."""
         from ._resample import full_index_maps, resample_figure, watch_view
 
         assert self.resample is not None
-        fig_dict, record = resample_figure(fig_dict, self.resample)
+        fig_dict, record = resample_figure(fig_dict, self.resample, owned_arrays=owned_arrays)
         if not record.series:
             return fig_dict, None
         output = self._output_name()
@@ -423,7 +425,9 @@ class render_plotly(Renderer[Figure]):
             fill_in_margins(fig_dict)
         resampled = None
         if self.resample is not None:
-            fig_dict, resampled = await self._resample(fig_dict)
+            fig_dict, resampled = await self._resample(
+                fig_dict, owned_arrays=isinstance(value, BaseFigure)
+            )
             if isinstance(value, BaseFigure):
                 encode_figure_arrays(
                     fig_dict, sampled_traces=() if resampled is None else resampled["index_maps"]

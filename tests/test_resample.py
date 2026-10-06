@@ -258,6 +258,38 @@ def test_the_callers_figure_is_not_written_to():
     assert np.array_equal(as_array(before_y), values), "still the complete original data"
 
 
+@pytest.mark.parametrize("owned", [False, True])
+@pytest.mark.parametrize("log_y", [False, True])
+def test_owned_snapshots_can_be_reused_but_log_masking_never_writes_to_them(owned, log_y):
+    x = np.arange(N, dtype=float)
+    y = x - 10
+    x.flags.writeable = y.flags.writeable = False
+    fig = {"data": [{"x": x, "y": y}], "layout": {"yaxis": {"type": "log" if log_y else "linear"}}}
+
+    _, record = resample_figure(fig, BUDGET, owned_arrays=owned)
+
+    series = record.series[0]
+    assert np.shares_memory(series.coords, x) == owned
+    assert np.shares_memory(series.y, y) == (owned and not log_y)
+    np.testing.assert_array_equal(y, x - 10)
+    if log_y:
+        assert np.isnan(series.y[:11]).all()
+    else:
+        np.testing.assert_array_equal(series.y, y)
+
+
+def test_sortedness_validation_does_not_overflow_for_finite_extreme_coordinates():
+    x = np.arange(N, dtype=float)
+    x[0], x[-1] = -np.finfo(float).max, np.finfo(float).max
+    # A subtraction-based sortedness check overflows even though these values are valid.
+    x[1] = np.finfo(float).max / 2
+    x[2:] = np.finfo(float).max
+
+    _, record = resample_figure({"data": [{"x": x, "y": np.arange(N)}]}, BUDGET)
+
+    assert 0 in record.series
+
+
 def test_every_per_point_attribute_is_sliced_with_the_points():
     ids = np.arange(N)
     fig = go.Figure(

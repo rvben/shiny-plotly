@@ -146,13 +146,13 @@ def _wall_clock(value: Any) -> np.datetime64:
     return np.datetime64(value, "us")
 
 
-def axis_coordinates(x: np.ndarray) -> np.ndarray:
+def axis_coordinates(x: np.ndarray, *, copy: bool = True) -> np.ndarray:
     """
     ``x`` in the unit plotly.js computes with on its axis: numbers as they are, dates as
     milliseconds since the epoch of their wall-clock time.
     """
     if x.dtype.kind in "iuf":
-        return x.astype(float)
+        return x.astype(float, copy=copy)
     if x.dtype.kind == "M":
         if np.isnat(x).any():
             raise Ineligible("x holds a missing date (NaT)")
@@ -265,9 +265,9 @@ class Record:
         return {index: frozenset(s.arrays) for index, s in self.series.items()}
 
 
-def _numbers(values: np.ndarray, what: str) -> np.ndarray:
+def _numbers(values: np.ndarray, what: str, *, copy: bool = True) -> np.ndarray:
     if values.dtype.kind in "iuf":
-        return values.astype(float)
+        return values.astype(float, copy=copy)
     if values.dtype.kind == "O":
         try:
             return values.astype(float)  # None becomes NaN, a gap, as plotly draws it
@@ -276,7 +276,9 @@ def _numbers(values: np.ndarray, what: str) -> np.ndarray:
     raise Ineligible(f"{what} is not numbers")
 
 
-def _series(trace: Mapping[str, Any], budget: int, log_y: bool) -> Series | None:
+def _series(
+    trace: Mapping[str, Any], budget: int, log_y: bool, *, owned_arrays: bool
+) -> Series | None:
     """The full data of ``trace``, or None when it is short enough to send whole."""
     if trace.get("y") is None:
         return None
@@ -294,12 +296,15 @@ def _series(trace: Mapping[str, Any], budget: int, log_y: bool) -> Series | None
         x = as_array(trace["x"])
         if x.ndim != 1 or len(x) != n:
             raise Ineligible("its x and y differ in length")
-        coords = axis_coordinates(x)
+        coords = axis_coordinates(x, copy=not owned_arrays)
     if not np.isfinite(coords).all():
         raise Ineligible("x holds a missing or infinite value")
-    if (np.diff(coords) < 0).any():
+    if (coords[1:] < coords[:-1]).any():
         raise Ineligible("x is not sorted (in the wall-clock time plotly.js draws)")
-    y_numbers = _numbers(y, "y")
+    # Figure component serialization already copied its arrays. Reuse those snapshots,
+    # but retain independent coordinates/numbers for caller-owned dictionary arrays.
+    # Log masking always needs a separate writable copy, including for owned snapshots.
+    y_numbers = _numbers(y, "y", copy=not owned_arrays or log_y)
     if log_y:
         # A log axis cannot place a value at or below zero, so plotly breaks the line
         # there, the same as at a NaN.
@@ -359,11 +364,16 @@ def _check_trace(
         raise Ineligible("its x axis has a rangeslider, which would show only the sample")
 
 
-def resample_figure(fig_dict: dict[str, Any], budget: int) -> tuple[dict[str, Any], Record]:
+def resample_figure(
+    fig_dict: dict[str, Any], budget: int, *, owned_arrays: bool = False
+) -> tuple[dict[str, Any], Record]:
     """
     ``fig_dict`` with each long eligible trace replaced by a full-range sample, and the
     record of the full data behind them. A long trace that cannot be resampled is sent
     whole, with a warning that names it and says why.
+
+    ``owned_arrays`` is reserved for the renderer's copied Figure components: their
+    native arrays can serve as the record's snapshots without another conversion copy.
     """
     data = list(fig_dict.get("data") or [])
     layout = fig_dict.get("layout") or {}
@@ -380,7 +390,7 @@ def resample_figure(fig_dict: dict[str, Any], budget: int) -> tuple[dict[str, An
             continue
         try:
             log_y = _axis_layout(layout, _y_axis(trace)).get("type") == "log"
-            series = _series(trace, budget, log_y)
+            series = _series(trace, budget, log_y, owned_arrays=owned_arrays)
             if series is None:
                 continue
             _check_trace(trace, layout, fill_linked, text_axes)
