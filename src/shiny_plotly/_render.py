@@ -12,6 +12,7 @@ from plotly.io.json import to_json_plotly
 from shiny.module import resolve_id
 from shiny.render.renderer import Jsonifiable, Renderer, ValueFn
 from shiny.session import Session, get_current_session
+from shiny.types import SilentCancelOutputException, SilentOperationInProgressException
 from shiny.ui.fill import as_fill_item, as_fillable_container
 
 from ._deps import plotly_js, shiny_plotly_js
@@ -268,9 +269,10 @@ class render_plotly(Renderer[Figure]):
         limit uvicorn applies by default, which closes the session.
     resample
         Draw long line traces as a sample, refreshed from the full data on zoom and pan.
-        The most points a trace shows at once, 10 or more; ``None`` (the default) sends
-        every point. A ``scatter`` or ``scattergl`` trace with more points than this is
-        drawn as the minimum and maximum of equal-width buckets plus both ends, with a
+        The most finite points a trace shows at once, 10 or more; gap markers can add
+        points. ``None`` (the default) sends every point. A ``scatter`` or ``scattergl``
+        trace with more points than this is drawn as the minimum and maximum of
+        equal-width buckets plus both ends, with a
         gap wherever the data has one, so spikes and breaks survive; the full data stays
         in the session on the server, and each zoom or pan (settled for 100 ms) redraws
         the visible range from it. Point events report original point numbers. A trace
@@ -384,16 +386,26 @@ class render_plotly(Renderer[Figure]):
         return session, session.ns(self.output_id)
 
     async def render(self) -> Jsonifiable:
-        # A new render makes every view report about the previous one stale, and lets go
-        # of its full data before the value function runs: a render that returns None or
-        # raises leaves nothing behind.
-        if self.resample is not None:
-            output = self._output_name()
-            if output is not None:
-                state = output_view(*output)
-                state.revision += 1
-                state.sampled = None
-        return await super().render()
+        # Keep the displayed figure's guards while an async value function runs. Only
+        # a replacement, an empty value or a visible error invalidates its full data.
+        output = self._output_name() if self.resample is not None else None
+        if output is None:
+            return await super().render()
+        state = output_view(*output)
+        try:
+            value = await super().render()
+        except (SilentCancelOutputException, SilentOperationInProgressException):
+            # These leave the browser's previous figure intact. Its view requests and
+            # update guards must continue to refer to the same server-side data.
+            raise
+        except BaseException:
+            state.revision += 1
+            state.sampled = None
+            raise
+        if value is None:
+            state.revision += 1
+            state.sampled = None
+        return value
 
     async def _resample(
         self, fig_dict: dict[str, Any], *, owned_arrays: bool
@@ -402,10 +414,14 @@ class render_plotly(Renderer[Figure]):
         from ._resample import full_index_maps, resample_figure, watch_view
 
         assert self.resample is not None
+        output = self._output_name()
+        if output is not None:
+            state = output_view(*output)
+            state.revision += 1
+            state.sampled = None
         fig_dict, record = resample_figure(fig_dict, self.resample, owned_arrays=owned_arrays)
         if not record.series:
             return fig_dict, None
-        output = self._output_name()
         revision = None
         if output is not None:
             state = output_view(*output)

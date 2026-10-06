@@ -3,6 +3,7 @@ the answers to view reports, re-renders, modules, the update guard and the clean
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from collections.abc import Iterator
@@ -13,13 +14,14 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
-from shiny import App, Inputs, Outputs, Session, module, reactive, ui
+from shiny import App, Inputs, Outputs, Session, module, reactive, req, ui
+from shiny.types import SilentOperationInProgressException
 from starlette.testclient import TestClient
 
 from shiny_plotly import extend_traces, output_plotly, relayout, render_plotly, restyle
 from shiny_plotly._html import as_fig_dict, encode_figure_arrays, plotly_utils
 from shiny_plotly._resample import as_array, resample_figure
-from shiny_plotly._views import _outputs
+from shiny_plotly._views import OutputView, _outputs
 
 from helpers import run
 
@@ -56,6 +58,12 @@ def make_app(sessions: list[Session]) -> App:
             mode = input.mode() if "mode" in input else "long"
             if mode == "empty":
                 return None
+            if mode == "cancel":
+                req(False, cancel_output=True)
+            if mode == "progress":
+                raise SilentOperationInProgressException()
+            if mode == "error":
+                raise ValueError("intentional rendering failure")
             return long_figure(1.0 if mode == "again" else 0.0)
 
         @render_plotly(resample=BUDGET)
@@ -274,6 +282,49 @@ def test_each_session_has_its_own_data_and_lets_go_of_it_when_it_ends(app_client
 
 
 # --- the option itself -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["cancel", "progress"])
+def test_cancelled_render_keeps_zoom_answers_and_update_guards(app_client, sessions, mode):
+    with connect(app_client) as client:
+        revision = client.value("fig")["resample"]["revision"]
+        state = _outputs[sessions[-1]]["fig"]
+        previous = state.sampled
+        client.send(mode=mode)
+        client.nothing_before_ping(1)
+        assert state.revision == revision and state.sampled is previous
+        client.report("fig", revision, 1, {"x": [100, 150]})
+        assert client.answer()["traces"]["0"]["index_map"] == list(range(99, 152))
+        client.send(try_updates=1)
+        assert "resample=" in client.custom("guard")["outcome"]
+
+
+def test_visible_render_error_invalidates_the_previous_sample(app_client, sessions):
+    with connect(app_client) as client:
+        revision = client.value("fig")["resample"]["revision"]
+        state = _outputs[sessions[-1]]["fig"]
+        client.send(mode="error")
+        client.until(lambda message: "fig" in (message.get("errors") or {}))
+        assert state.revision > revision and state.sampled is None
+
+
+def test_async_value_function_retains_the_displayed_sample_until_it_returns(monkeypatch):
+    from shiny_plotly import _render
+
+    _, previous = resample_figure(long_figure().to_dict(), BUDGET)
+    state = OutputView(revision=5, sampled=previous)
+    monkeypatch.setattr(_render, "output_view", lambda *args: state)
+
+    @render_plotly(resample=BUDGET)
+    async def fig():
+        assert state.sampled is previous and state.revision == 5
+        await asyncio.sleep(0)
+        assert state.sampled is previous and state.revision == 5
+        return None
+
+    monkeypatch.setattr(fig, "_output_name", lambda: (None, "fig"))
+    assert run(fig.render()) is None
+    assert state.sampled is None and state.revision == 6
 
 
 @pytest.mark.parametrize("bad", [0, 9, -5, True, 2.5, "100"])
