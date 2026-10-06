@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-events check version check-version release-notes publish clean \
+	check-floor bench bench-events bench-resample check version check-version release-notes publish clean \
 	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -93,6 +93,11 @@ bench:
 # uncapped (bench/events.py); the numbers behind that option's default.
 bench-events:
 	uv run python -m bench.events $(BENCH_ARGS)
+
+# Server render, sampling, and broad view-update timings; hashes verify that lazy
+# indexing preserves the direct sampler's payload. No browser or result file required.
+bench-resample:
+	uv run python -m bench.resample $(BENCH_ARGS)
 
 # Pinned: the demo build runs only in the Pages workflow, so a shinylive release
 # could break the deploy with no CI run ever having seen it. Bump deliberately.
