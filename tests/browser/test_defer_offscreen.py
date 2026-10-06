@@ -472,7 +472,7 @@ def test_output_removed_during_first_draw_is_purged_when_the_draw_finishes(app: 
     assert "dynamic-plotly" in app.evaluate("window.purgedIds")
 
 
-def test_removing_an_output_after_a_failed_first_draw_releases_retained_failure(app: Page):
+def test_removing_an_output_after_a_failed_first_draw_releases_retained_failure(app: Page, errors):
     app.evaluate("""() => {
         Plotly.newPlot = () => Promise.reject(new Error('intentional first draw failure'));
         window.failedOutput = document.createElement('div');
@@ -482,9 +482,118 @@ def test_removing_an_output_after_a_failed_first_draw_releases_retained_failure(
         const binding = $('#far').data('shiny-output-binding').binding;
         window.firstFailure = binding.renderValue(window.failedOutput, {
             figure: JSON.stringify({data: [{y: [1]}]})
-        }).catch(err => err.message);
+        });
     }""")
-    assert app.evaluate("() => window.firstFailure") == "intentional first draw failure"
+    app.evaluate("() => window.firstFailure")
+    assert app.evaluate("() => shinyPlotly.flush().catch(err => err.message)") == (
+        "intentional first draw failure"
+    )
+    assert len(errors) == 1 and "intentional first draw failure" in errors[0]
+    errors.clear()
     app.evaluate("window.failedOutput.remove()")
     app.wait_for_function("window.failedOutput._shinyPlotlyDeferred.error === null")
     app.evaluate("() => window.shinyPlotly.flush()")
+
+
+def test_failed_predecessor_does_not_reject_a_new_value_or_skip_later_outputs(app: Page, errors):
+    set_n(app, 4)
+    app.evaluate(HOLD_REACT)
+    run_idle(app)
+    app.wait_for_function("window.draws.length === 1")
+    app.evaluate("""() => {
+        Object.assign(document.getElementById('far').style, {position: 'fixed', top: '100px'});
+        const figure = y => ({figure: JSON.stringify({data: [{y: [y]}]})});
+        window.messageDone = false;
+        window.replacementError = null;
+        Shiny.shinyapp.dispatchMessage(JSON.stringify({values: {
+            far: figure(5), near: figure(6)
+        }})).then(() => { window.messageDone = true; },
+                  err => { window.replacementError = err.message; });
+    }""")
+    app.evaluate("window.draws[0].reject(new Error('intentional predecessor failure'))")
+    app.wait_for_function("window.draws.length === 2 || window.replacementError !== null")
+    assert app.evaluate("window.replacementError") is None
+    release_draw(app, 1)
+    app.wait_for_function("window.draws.length === 3")
+    release_draw(app, 2)
+    app.wait_for_function("window.messageDone")
+    assert value(app, trace_y("far", 0)) == [5]
+    assert value(app, trace_y("near", 0)) == [6]
+    assert len(errors) == 1 and "intentional predecessor failure" in errors[0]
+    errors.clear()
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_failed_first_draw_recovers_with_all_first_draw_initialization(app: Page, deferred, errors):
+    app.evaluate(
+        """deferred => {
+        const original = Plotly.newPlot;
+        const el = document.createElement('div');
+        el.id = 'recovery';
+        el.style.height = '150px';
+        if (deferred) el.setAttribute('data-shiny-plotly-defer', '');
+        document.body.appendChild(el);
+        const binding = $('#far').data('shiny-output-binding').binding;
+        Plotly.newPlot = () => Promise.reject(new Error('intentional first failure'));
+        window.recovery = binding.renderValue(el, {
+            figure: JSON.stringify({data: [{y: [1]}]})
+        }).catch(err => err.message).then(async message => {
+            if (deferred) message = await shinyPlotly.flush().catch(err => err.message);
+            window.firstError = message;
+            Plotly.newPlot = original;
+            return binding.renderValue(el, {
+                figure: JSON.stringify({data: [{y: [2]}]}),
+                events: ['click'], post_script: 'window.recoveredPostScript = true;'
+            });
+        });
+    }""",
+        deferred,
+    )
+    app.evaluate("() => window.recovery")
+    assert app.evaluate("window.firstError") == "intentional first failure"
+    assert app.evaluate("window.recoveredPostScript") is True
+    assert app.evaluate(f"Boolean({gd('recovery')}._shinyPlotlyView)")
+    assert app.evaluate(f"{gd('recovery')}._shinyPlotlyDrawn") is True
+    assert value(app, trace_y("recovery", 0)) == [2]
+    if deferred:
+        assert len(errors) == 1 and "intentional first failure" in errors[0]
+        errors.clear()
+
+
+def test_updates_after_failure_are_dropped_instead_of_retained_forever(app: Page):
+    app.evaluate("""() => {
+        const el = document.getElementById('far');
+        Plotly.react = () => Promise.reject(new Error('intentional draw failure'));
+        const binding = $(el).data('shiny-output-binding').binding;
+        window.failure = binding.renderValue(el, {
+            figure: JSON.stringify({data: [{y: [4]}]})
+        });
+    }""")
+    assert app.evaluate("() => shinyPlotly.flush().catch(err => err.message)") == (
+        "intentional draw failure"
+    )
+    for y in ([40], [41], [42]):
+        send_update(app, y)
+    assert app.evaluate("document.getElementById('far')._shinyPlotlyPending == null")
+    assert app.evaluate("() => shinyPlotly.flush().catch(err => err.message)") == (
+        "intentional draw failure"
+    )
+
+
+def test_own_draw_failure_preserves_later_outputs_and_remains_observable(app: Page, errors):
+    app.evaluate("""() => {
+        Object.assign(document.getElementById('far').style, {position: 'fixed', top: '100px'});
+        const react = Plotly.react;
+        Plotly.react = (gd, figure) => gd.id === 'far-plotly'
+            ? Promise.reject(new Error('intentional own failure')) : react(gd, figure);
+        const figure = y => ({figure: JSON.stringify({data: [{y: [y]}]})});
+        return Shiny.shinyapp.dispatchMessage(JSON.stringify({values: {
+            far: figure(5), near: figure(6)
+        }}));
+    }""")
+    assert value(app, trace_y("near", 0)) == [6]
+    assert app.evaluate("() => shinyPlotly.flush().catch(err => err.message)") == (
+        "intentional own failure"
+    )
+    assert len(errors) == 1 and "intentional own failure" in errors[0]
+    errors.clear()

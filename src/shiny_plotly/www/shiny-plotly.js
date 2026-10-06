@@ -544,7 +544,10 @@
     if (!state) return Promise.resolve();
     if (force && state.waiting) state.waiting.ready = true;
     if (state.active) {
-      return state.active.promise.then(function () { return settleDeferred(el, force); });
+      // A predecessor's failure belongs to it. A replacement still gets its own draw;
+      // without a replacement, settleDeferred reports the retained failure below.
+      var next = function () { return settleDeferred(el, force); };
+      return state.active.promise.then(next, next);
     }
     if (state.waiting && state.waiting.ready) {
       return startDeferred(el).then(function () { return settleDeferred(el, force); });
@@ -563,7 +566,13 @@
     state.waiting = { value: value, ready: !deferrable(el),
       cancelled: false, _shinyPlotlyPending: pending };
     rememberDeferred(el);
-    if (state.waiting.ready) return settleDeferred(el, false);
+    if (state.waiting.ready) {
+      var promise = settleDeferred(el, false);
+      reportDraw(el, promise);
+      // Shiny awaits output bindings serially. Retain the failure for flush(), but
+      // let the rest of this values message render even if this output failed.
+      return promise.catch(function () {});
+    }
     el.classList.add("shiny-plotly-stale");
     watchWaiting(el);
     scheduleDrain();
@@ -658,7 +667,7 @@
     figure.config = value.config;
     var themes = themesFor(value);
     var gd = graphDiv(el);
-    var redraw = gd !== null;
+    var redraw = gd !== null && gd._shinyPlotlyDrawn;
     if (!redraw) {
       clear(el); // an error message may be showing
       gd = create(el, value);
@@ -846,7 +855,13 @@
       hold(state.active, update);
       return;
     }
-    if (state && state.error) { hold(el, update); return; }
+    if (state && state.error) {
+      // The current figure is unreliable. A replacement resets it and supersedes its
+      // updates, so retaining a stream here would grow a queue that cannot be applied.
+      console.warn("shiny-plotly: " + update.method + " for '" + el.id +
+        "' dropped after a failed draw; re-render the output to recover");
+      return;
+    }
     var gd = graphDiv(el);
     if (gd && gd._shinyPlotlyDrawn) {
       applyUpdate(gd, { method: update.method, args: JSON.parse(update.args) });
