@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/rvben/shiny-plotly/compare/v0.4.3...v0.5.0) - 2026-10-06
+
 ### Added
 
 - `output_plotly(defer_offscreen=True)` postpones redraws of already drawn graphs more than 200px outside the viewport. Waiting figures draw one at a time when the browser is idle, or sooner on scrolling near, pointer entry, or focus. Only the latest waiting figure and its subsequent updates are retained. Waiting outputs carry an overridable, delayed `shiny-plotly-stale` indicator. First draws, empty values, and errors are not deferred. Off by default.
-- `window.shinyPlotly.flush()` draws waiting figures and awaits active redraws, queued updates, and resizing. It rejects on failure, letting export and programmatic printing code await a complete snapshot. Native printing starts a best-effort refresh.
-
-- `render_plotly(resample=N)` draws long `scatter` and `scattergl` traces as a sample of at most N points and keeps the full data in the session on the server. Each zoom or pan redraws the visible range from the full data, so the detail is there at every zoom while the page receives a few thousand points instead of millions. The sample is the minimum and maximum of equal-width buckets, both ends and every gap, so spikes survive and gaps are never bridged. Point events report positions in the full data, and per-point attributes such as `customdata` and `marker.color` are sliced with the points. A trace that cannot be sampled faithfully is sent whole, with a warning saying why, and in-place updates that would put the data and the drawn sample out of step raise `ValueError`. Needs numpy: `pip install shiny-plotly[resample]`.
+- `window.shinyPlotly.flush()` draws waiting figures and awaits active browser redraws, queued updates, and resizing. It rejects on failure; a new figure clears the failure, and subsequent updates are dropped with a warning until then. It does not wait for server resampling answers requested by a preserved zoom. Native printing starts a best-effort refresh.
+- `render_plotly(resample=N)` draws long `scatter` and `scattergl` traces as a sample of at most N finite points plus gap markers and keeps the full data in the session on the server. Each zoom or pan redraws the visible range from the full data, so the detail is there at every zoom while the page receives a few thousand points instead of millions. The sample is the minimum and maximum of equal-width buckets, both ends and every gap, so spikes survive and gaps are never bridged. Point events report positions in the full data, and per-point attributes such as `customdata` and `marker.color` are sliced with the points. A trace that cannot be sampled faithfully is sent whole, with a warning saying why, and in-place updates that would put the data and the drawn sample out of step raise `ValueError`. Needs numpy: `pip install shiny-plotly[resample]`.
 
 ### Changed
 
@@ -21,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resampling reuses the renderer's owned float64 snapshots and checks sorted coordinates without allocating their differences. Caller-owned arrays and log-axis masking retain independent copies.
 - Repeated broad zooms and pans of very long traces build a small, exact extrema index lazily. Initial draws, narrow views, and densely gapped data retain the direct sampler; indexed views preserve the same spikes, ties, gaps, and point indices.
 - Fully missing long traces keep their endpoints without allocating extrema buffers or enumerating every gap.
+
+### Fixed
+
+- Cancelled resampled renders preserve the displayed figure's view answers and update guards, including while an extended task is in progress.
+- A failed deferred draw cannot reject its replacement or prevent later outputs in the same message from rendering. Failed first draws recover with their events, view tracking, and post-script initialized.
+- Figures with animation frames or local `restyle`, `update`, or `animate` controls send long traces whole with a warning, preventing those controls from replacing a sample while retaining incorrect point-event maps. Local axis-type and rangeslider controls also fall back to full traces.
 
 ## [0.4.3](https://github.com/rvben/shiny-plotly/compare/v0.4.2...v0.4.3) - 2026-09-25
 

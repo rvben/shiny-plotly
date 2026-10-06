@@ -161,16 +161,23 @@ def sensor():
     return go.Figure(go.Scattergl(x=timestamps, y=readings, mode="lines"))
 ```
 
-Each `scatter` or `scattergl` trace with more points than `resample` is drawn as the minimum and maximum of equal-width buckets, plus both ends and a gap marker wherever the data breaks (a NaN, an infinity, a value at or below zero on a log axis), so spikes survive and a gap is never bridged. The full data stays in the session, on the server. When the user zooms or pans, the browser reports the new range once it has settled for 100 ms, and the server redraws each trace on that axis from the points in view, at the same budget: zoomed in far enough, every point is drawn. Resetting the axes (double click, or the home button) redraws the first sample, which the server keeps rather than recomputes. Shorter traces and other trace types are sent as they are.
+Each `scatter` or `scattergl` trace with more points than `resample` is drawn as the minimum and maximum of equal-width buckets, plus both ends and a gap marker wherever the data breaks (a NaN, an infinity, a value at or below zero on a log axis), so spikes survive and a gap is never bridged. The full data stays in the session, on the server. When the user zooms or pans, the browser reports the new range once it has settled for 100 ms, and the server redraws each trace on that axis from the points in view, at the same finite-point budget (gap markers can add points): zoomed in far enough, every point is drawn. Resetting the axes (double click, or the home button) redraws the first sample, which the server keeps rather than recomputes. Shorter traces and other trace types are sent as they are.
 
 - Point events (`click`, `hover`, `selected`) report `pointNumber`, `pointIndex` and `pointNumbers` as positions in the full data, and `customdata`, `text` and every other per-point attribute are sliced along with x and y, so an event means the same as it would on the full trace.
 - A box or lasso selection covers the points drawn, not all points in the box; the event's `range` or `lassoPoints` says what was selected, for the server to count against its full data.
 - Hover shows the sampled points.
 - A re-render with a steady `uirevision` keeps the user's zoom and redraws that zoom from the new data.
-- A trace that cannot be sampled faithfully is sent whole, with one warning per render naming it and the reason: x that is not sorted (after converting times to the wall clock plotly.js draws), not numbers or dates, or missing values; y that is not numbers; stacking (`stackgroup`) or a `tonext` fill on its subplot; `xperiod`; per-point error bars; a non-gregorian `xcalendar`; an axis of category type; an x axis with a rangeslider, which would show only the sample.
+- A trace that cannot be sampled faithfully is sent whole, with one warning per render naming it and the reason: x that is not sorted (after converting times to the wall clock plotly.js draws), not numbers or dates, or missing values; y that is not numbers; stacking (`stackgroup`) or a `tonext` fill on its subplot; `xperiod`; per-point error bars; a non-gregorian `xcalendar`; an axis of category type; an x axis with a rangeslider, which would show only the sample. Figures with animation frames or local buttons/sliders using `restyle`, `update`, or `animate` also send their long traces whole, since those controls can replace data without updating the server's sample. Local relayout controls that change a sampled axis's type or rangeslider also fall back to the full trace; local zoom controls remain supported.
 - In-place updates that would put the full data and the drawn sample out of step raise `ValueError`: `extend_traces`, `prepend_traces`, `add_traces` and `delete_traces` on the output, a `restyle` of x, y or any per-point attribute of a resampled trace, of `type`, `fill`, `stackgroup` or the axes of any trace, and a `relayout` of a resampled axis's `type` (or an x axis's `rangeslider`). A restyle of a colour, a line width or a name, and any other relayout, work as usual. To change the data, re-render.
 
 A runnable version with a million points is `examples/resample_app.py`.
+
+Repeated broad zooms and pans of very long traces can build a small extrema index on the
+third broad view. This adds a one-time build cost and about 0.25–0.375 bytes per source
+point, plus full-size temporary buffers during the build; subsequent broad views return
+exactly the same points faster. Initial draws and
+narrow views use the direct sampler, and densely gapped traces skip indexing. The full
+data and any index belong to the session and are replaced when the output re-renders.
 
 ### Migrating from shinywidgets
 
@@ -215,7 +222,7 @@ First draws, empty values, and server errors are never deferred. The server stil
 
 A waiting output carries `shiny-plotly-stale` until its redraw and queued updates finish. It dims after half a second, using a zero-specificity CSS rule. Override it in your app to change the indicator, for example `.shiny-plotly-stale { opacity: 1; }`.
 
-Code that reads graph data, such as a button exporting all charts, must first await `window.shinyPlotly.flush()`. For opted-in outputs, it draws waiting figures, waits for redraws already running, and resolves after their queued updates and resizing finish. It rejects if drawing or an update fails; a new figure clears that failure. For a complete snapshot before programmatic printing:
+Code that reads graph data, such as a button exporting all charts, must first await `window.shinyPlotly.flush()`. For opted-in outputs, it draws waiting figures, waits for redraws already running, and resolves after their queued updates and resizing finish. It rejects if drawing or an update fails; a new figure clears that failure. Updates arriving after a failure are dropped with a warning until a new figure arrives, so a stream cannot build an unusable queue. The promise covers browser draws; it does not wait for server resampling answers requested by a preserved zoom. A resampled figure may still show its overview while that answer is in flight, so `flush()` alone cannot guarantee zoom detail in an export. For a snapshot of the figures currently available in the browser before programmatic printing:
 
 ```js
 await window.shinyPlotly.flush();
@@ -465,7 +472,19 @@ make browsers    # playwright install chromium, once
 make check       # lint, typecheck, unit + e2e tests, browser tests, wheel check, floor check
 make bench       # the shinywidgets comparison above, on this machine
 make bench-events  # what a selection over a dense trace costs, capped and uncapped
+make bench-resample  # server rendering, sampling, and repeated broad views
 ```
+
+`make bench-resample` measures finite, sparsely gapped, densely gapped, and fully missing
+traces at one and five million points. It reports initial rendering, direct sampling,
+the first three view updates (including any index build), steady view updates, and
+retained index size, and whether indexing was enabled. At the default budget, the
+one-million-point views exercise the direct sampler; the five-million-point finite and
+sparse-gap views build an index and check that indexed and direct payloads match exactly.
+These are server timings; browser drawing and network latency are excluded. Compare
+commits on an idle machine with the same Python and dependency versions, and compare
+the payload hashes alongside the timings. Save results outside the checkout with, for
+example, `make bench-resample BENCH_ARGS="--repeats 35 --output /tmp/resample.json"`.
 
 `make test` runs the unit tests and the in-process Shiny end-to-end tests over a real websocket, including the compressed bundle route. It fails below 100% line and branch coverage of the package: every line is reachable without a browser, and the gate is what keeps behavior that only the Chromium suite can reach from growing. `make test-browser` drives the package in headless Chromium: fill sizing, resize without a window event, the graph div surviving a re-render, `uirevision` keeping a dragged zoom, purge once an output leaves the page, full screen, `events=` click, hover, selection and relayout inputs (attached once, also inside a module, a selection above `max_event_points` arriving as count and range), `extend_traces`, `restyle` and `relayout` applied in place (rolling window, one trace or all, held until the first draw, reset by a re-render, inside a module, dropped with a warning for an unknown output), `post_script` click wiring (once, not stacked), the dark mode recipe, error and `None` rendering, on-demand loading of plotly.js and the compressed, cached bundle as a fresh visitor sees it. `make check-wheel` installs the built wheel into a throwaway venv and runs the suite against it, so the published artifact is what was tested. `make check-floor` installs the package with plotly, shiny and htmltools at the oldest versions `pyproject.toml` allows and runs the whole suite again, browser tests included, so the declared lower bounds are tested on every push rather than assumed.
 
