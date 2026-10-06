@@ -55,7 +55,7 @@ uv add shiny-plotly
 pip install shiny-plotly
 ```
 
-Requires Python 3.10+, `shiny>=1.0`, `plotly>=5.5`.
+Requires Python 3.10+, `shiny>=1.0`, `plotly>=5.5`. Resampling long traces on zoom (`resample=`) also needs numpy: `uv add 'shiny-plotly[resample]'`.
 
 ## Use
 
@@ -131,6 +131,7 @@ The decorator creates its own output placeholder in Express, just like `@render_
     events=("click", "selected"),  # arrive as input.sales_click, input.sales_selected
     max_event_points=10_000,  # above it an event carries the count and range, not the points
     theme="auto",  # follow the page's color mode in the browser; also takes (light, dark)
+    resample=2000,  # draw long line traces as a sample, refreshed on zoom (see below)
     post_script=MORE_JS,  # JavaScript run once, when the graph is first drawn
 )
 def sales(): ...
@@ -149,6 +150,27 @@ Whether the user's zoom and pan survive is plotly's `uirevision` rule, the same 
 def prices():
     return px.line(frame(), x="date", y="close").update_layout(uirevision="prices")
 ```
+
+### Long series: resampling on zoom
+
+A line of a million points costs its full size on the wire and in the browser before anything is drawn, though a chart a few thousand pixels wide can show only a few thousand of them. `resample=` sends a sample instead and keeps the full data on the server:
+
+```python
+@render_plotly(resample=2000)
+def sensor():
+    return go.Figure(go.Scattergl(x=timestamps, y=readings, mode="lines"))
+```
+
+Each `scatter` or `scattergl` trace with more points than `resample` is drawn as the minimum and maximum of equal-width buckets, plus both ends and a gap marker wherever the data breaks (a NaN, an infinity, a value at or below zero on a log axis), so spikes survive and a gap is never bridged. The full data stays in the session, on the server. When the user zooms or pans, the browser reports the new range once it has settled for 100 ms, and the server redraws each trace on that axis from the points in view, at the same budget: zoomed in far enough, every point is drawn. Resetting the axes (double click, or the home button) redraws the first sample, which the server keeps rather than recomputes. Shorter traces and other trace types are sent as they are.
+
+- Point events (`click`, `hover`, `selected`) report `pointNumber`, `pointIndex` and `pointNumbers` as positions in the full data, and `customdata`, `text` and every other per-point attribute are sliced along with x and y, so an event means the same as it would on the full trace.
+- A box or lasso selection covers the points drawn, not all points in the box; the event's `range` or `lassoPoints` says what was selected, for the server to count against its full data.
+- Hover shows the sampled points.
+- A re-render with a steady `uirevision` keeps the user's zoom and redraws that zoom from the new data.
+- A trace that cannot be sampled faithfully is sent whole, with one warning per render naming it and the reason: x that is not sorted (after converting times to the wall clock plotly.js draws), not numbers or dates, or missing values; y that is not numbers; stacking (`stackgroup`) or a `tonext` fill on its subplot; `xperiod`; per-point error bars; a non-gregorian `xcalendar`; an axis of category type; an x axis with a rangeslider, which would show only the sample.
+- In-place updates that would put the full data and the drawn sample out of step raise `ValueError`: `extend_traces`, `prepend_traces`, `add_traces` and `delete_traces` on the output, a `restyle` of x, y or any per-point attribute of a resampled trace, of `type`, `fill`, `stackgroup` or the axes of any trace, and a `relayout` of a resampled axis's `type` (or an x axis's `rangeslider`). A restyle of a colour, a line width or a name, and any other relayout, work as usual. To change the data, re-render.
+
+A runnable version with a million points is `examples/resample_app.py`.
 
 ### Migrating from shinywidgets
 
@@ -410,6 +432,7 @@ uv run --with shiny-plotly shiny run examples/express_app.py  # the Express flav
 uv run --with shiny-plotly shiny run examples/dark_app.py     # theme="auto" and a custom (light, dark) pair
 uv run --with shiny-plotly shiny run examples/events_app.py   # box selections over a 50k-point trace
 uv run --with shiny-plotly shiny run examples/streaming_app.py # a rolling window fed by extend_traces
+uv run --with 'shiny-plotly[resample]' shiny run examples/resample_app.py # a million points, resampled on zoom
 uvx shinylive export examples/shinylive site                  # the same package, running in the browser
 ```
 

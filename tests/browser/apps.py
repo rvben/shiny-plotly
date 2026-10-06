@@ -747,3 +747,77 @@ def make_arrays_app() -> App:
             return f"bursts {sent()}"
 
     return App(app_ui, server)
+
+
+RESAMPLE_BUDGET = 1000
+BIG = 100_000
+SPIKE_AT = 77_777
+
+
+def make_resample_app() -> App:
+    """
+    Outputs rendered with ``resample=``: long traces that travel as a sample and are
+    resampled on every zoom, on a linear, a date and a log axis, with a click event and
+    a re-render that keeps the zoom (``uirevision``). ``reports`` counts the view reports
+    the server received, so a test can tell a debounced pan from one report per frame.
+    """
+    app_ui = ui.page_fluid(
+        ui.input_action_button("rerender", "re-render"),
+        ui.output_text("reports"),
+        ui.output_text("click_out"),
+        output_plotly("big", height="300px", width="600px"),
+        output_plotly("dates", height="300px", width="600px"),
+        output_plotly("logx", height="300px", width="600px"),
+        output_plotly("clicks", height="300px", width="600px"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        report_count = reactive.value(0)
+
+        @reactive.effect
+        @reactive.event(input["big__shiny_plotly_view"])
+        def _count():
+            report_count.set(report_count.get() + 1)
+
+        @render.text
+        def reports():
+            return f"reports {report_count()}"
+
+        @render_plotly(resample=RESAMPLE_BUDGET)
+        def big():
+            offset = 1000.0 * input.rerender()
+            x = np.arange(BIG)
+            y = np.sin(x / 500.0) + offset
+            y[SPIKE_AT] = offset + 50.0
+            fig = go.Figure(
+                [
+                    go.Scattergl(x=x, y=y, customdata=x, name="long"),
+                    go.Scattergl(x=[0, BIG - 1], y=[offset, offset], name="short"),
+                    go.Scattergl(x=x, y=np.cos(x / 500.0) + offset, name="second"),
+                ]
+            )
+            return fig.update_layout(uirevision="keep", showlegend=False)
+
+        @render_plotly(resample=RESAMPLE_BUDGET)
+        def dates():
+            x = np.datetime64("2026-01-01T00:00") + np.arange(50_000) * np.timedelta64(1, "m")
+            return go.Figure(go.Scattergl(x=x, y=np.sin(np.arange(50_000) / 100.0)))
+
+        @render_plotly(resample=RESAMPLE_BUDGET)
+        def logx():
+            x = np.arange(1, 50_001, dtype=float)
+            fig = go.Figure(go.Scattergl(x=x, y=np.sqrt(x)))
+            return fig.update_xaxes(type="log")
+
+        @render_plotly(resample=100, events="click")
+        def clicks():
+            x = np.arange(5000)
+            return go.Figure(go.Scatter(x=x, y=np.sin(x / 10.0), mode="markers", customdata=x))
+
+        @render.text
+        def click_out():
+            if not input.clicks_click.is_set():
+                return "-"
+            return json.dumps(input.clicks_click()["points"][0])
+
+    return App(app_ui, server)

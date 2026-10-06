@@ -49,13 +49,14 @@ build:
 
 # Installs the freshly built wheel into a throwaway venv and runs the non-browser suite
 # against it, so what ships (the JS helper and py.typed included) is what was tested, not
-# the editable checkout. numpy is a test dependency here rather than the package's: without
-# it nine tests of the numpy paths skipped, quietly making this run cover less than `test`.
+# the editable checkout. numpy and pandas are test dependencies here rather than the
+# package's (numpy is only the resample extra's): without them the tests of the numpy,
+# pandas and resampling paths skip, quietly making this run cover less than `test`.
 # -rs names every skip that is left, so none of them passes for something nobody looked at.
 check-wheel: build
 	rm -rf .wheel-venv
 	uv venv --quiet .wheel-venv
-	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2 numpy
+	uv pip install --quiet --python .wheel-venv/bin/python dist/*.whl pytest httpx2 numpy pandas
 	.wheel-venv/bin/python -c "import shiny_plotly; print('shiny_plotly', shiny_plotly.__version__)"
 	cd tests && ../.wheel-venv/bin/python -m pytest -q -rs -p no:cacheprovider --ignore=browser \
 		--rootdir=.. -c ../pyproject.toml .
@@ -72,7 +73,7 @@ check-floor:
 	uv venv --quiet .floor-venv
 	uv pip install --quiet --python .floor-venv/bin/python --resolution lowest-direct .
 	uv pip install --quiet --python .floor-venv/bin/python pytest httpx2 \
-		pytest-playwright numpy
+		pytest-playwright numpy pandas
 	.floor-venv/bin/python -c "import plotly, shiny, htmltools; \
 		print('plotly', plotly.__version__, 'shiny', shiny.__version__, 'htmltools', htmltools.__version__)"
 	.floor-venv/bin/python -m playwright install $(PLAYWRIGHT_ARGS) chromium

@@ -20,6 +20,7 @@
 
   var FILL_BASIS = "400px"; // height of a filling plot when nothing constrains it
   var HOVER_DELAY_MS = 100; // quiet time before a hover (or the pointer leaving) is sent
+  var VIEW_DELAY_MS = 100; // quiet time before a zoom or pan asks for a closer sample
   var observer = null;
 
   function differs(actual, laidOut) {
@@ -57,6 +58,7 @@
     if (observer !== null) observer.unobserve(gd);
     forget(gd);
     if (gd._shinyPlotlyHover) clearTimeout(gd._shinyPlotlyHover.timer);
+    if (gd._shinyPlotlyView) clearTimeout(gd._shinyPlotlyView.timer);
     if (window.Plotly && gd._fullLayout) window.Plotly.purge(gd);
   }
 
@@ -172,6 +174,14 @@
     }
     if (point.bbox) out.bbox = point.bbox;
     if (point.pointNumbers) out.pointNumbers = point.pointNumbers;
+    // A resampled trace draws a sample; the server knows its points by their place in
+    // the full data, so the numbers go out as those.
+    var map = gd._shinyPlotlyResample && gd._shinyPlotlyResample.index_maps[point.curveNumber];
+    if (map) {
+      if (typeof out.pointNumber === "number") out.pointNumber = map[out.pointNumber];
+      if (typeof out.pointIndex === "number") out.pointIndex = map[out.pointIndex];
+      if (out.pointNumbers) out.pointNumbers = out.pointNumbers.map(function (i) { return map[i]; });
+    }
     if (Array.isArray(point.pointNumber)) out.pointNumber = point.pointNumber.slice();
     // Plotly puts the point's customdata on the point itself, looked up the way the trace
     // type addresses its points; a trace without customdata leaves it undefined.
@@ -260,6 +270,105 @@
     });
   }
 
+  // --- resampling: a closer sample for every zoom and pan --------------------------------
+  // A figure rendered with resample= draws a sample of each long trace, and the server
+  // keeps the full data. When the view of an axis carrying one changes, the graph reports
+  // the new range (null for an autoranged axis, which wants the whole trace back) through
+  // the input <output id>__shiny_plotly_view, and the server answers with a sample of just
+  // that range, restyled into the traces.
+  //
+  // Every change of view takes a new sequence number at once, before the quiet period, and
+  // an answer is drawn only for the latest number and the figure's current revision. So an
+  // answer about a view the user has already left, or about a figure since re-rendered, is
+  // dropped rather than drawn over what is on screen.
+
+  var CONTINUOUS = ["linear", "date", "log"];
+
+  function axisKey(name) {
+    return name.charAt(0) + "axis" + name.slice(1); // "x2" -> "xaxis2"
+  }
+
+  // The range of each axis carrying a resampled trace, in the unit plotly computes with
+  // (milliseconds for dates, the value itself for a log axis); an axis that is no longer
+  // a continuous one is left out, and its traces keep the sample they have.
+  function currentView(gd) {
+    var sampled = gd._shinyPlotlyResample;
+    var axes = {};
+    Object.keys(sampled.axes).forEach(function (index) {
+      var name = sampled.axes[index];
+      var ax = gd._fullLayout[axisKey(name)];
+      if (!ax || CONTINUOUS.indexOf(ax.type) === -1) return;
+      axes[name] = ax.autorange ? null : [ax.r2c(ax.range[0]), ax.r2c(ax.range[1])];
+    });
+    return axes;
+  }
+
+  function requestView(gd) {
+    var view = gd._shinyPlotlyView;
+    var axes = currentView(gd);
+    view.requested = JSON.stringify(axes);
+    window.Shiny.setInputValue(view.outputId + "__shiny_plotly_view", {
+      revision: gd._shinyPlotlyResample.revision,
+      seq: view.seq,
+      axes: axes
+    }, { priority: "event" });
+  }
+
+  function onViewChange(gd) {
+    var view = gd._shinyPlotlyView;
+    if (!gd._shinyPlotlyResample || gd._shinyPlotlyResample.revision === null) return;
+    if (view.timer === null && JSON.stringify(currentView(gd)) === view.requested) return;
+    view.seq += 1;
+    clearTimeout(view.timer);
+    view.timer = setTimeout(function () {
+      view.timer = null;
+      requestView(gd);
+    }, VIEW_DELAY_MS);
+  }
+
+  function watchView(gd, outputId) {
+    gd._shinyPlotlyView = { outputId: outputId, seq: 0, timer: null, requested: null };
+    gd.on("plotly_relayout", function () { onViewChange(gd); });
+  }
+
+  // After each draw: a fresh sample is of the full range, so a view the user kept across
+  // a re-render (layout.uirevision) or a range the figure sets asks for its own at once.
+  function afterSampledDraw(gd) {
+    var view = gd._shinyPlotlyView;
+    view.seq += 1;
+    clearTimeout(view.timer);
+    view.timer = null;
+    var sampled = gd._shinyPlotlyResample;
+    if (!sampled || sampled.revision === null) return;
+    var axes = currentView(gd);
+    var zoomed = Object.keys(axes).some(function (name) { return axes[name] !== null; });
+    if (zoomed) requestView(gd);
+    else view.requested = JSON.stringify(axes);
+  }
+
+  // The server's answer: [revision, seq, {trace index: {attributes, index_map}}], drawn in
+  // one restyle. A trace without some attribute leaves that entry undefined, which restyle
+  // skips.
+  function applySample(gd, args) {
+    var sampled = gd._shinyPlotlyResample;
+    var view = gd._shinyPlotlyView;
+    if (!sampled || args[0] !== sampled.revision || args[1] !== view.seq) return Promise.resolve();
+    var traces = args[2];
+    var indices = Object.keys(traces).map(Number);
+    var update = {};
+    indices.forEach(function (index, at) {
+      var attributes = traces[index].attributes;
+      Object.keys(attributes).forEach(function (path) {
+        if (!update[path]) update[path] = new Array(indices.length);
+        // Plain arrays: restyle reads an array of per-trace arrays, which a binary
+        // {dtype, bdata} object is not.
+        update[path][at] = plainArray(attributes[path]);
+      });
+      sampled.index_maps[index] = traces[index].index_map;
+    });
+    return window.Plotly.restyle(gd, update, indices);
+  }
+
   // --- the output binding -------------------------------------------------------------
 
   function graphDiv(el) {
@@ -321,6 +430,7 @@
     // The graph div exists before the mode is read: the mode comes from where the graph
     // sits on the page, so there has to be a graph there to ask about.
     gd._shinyPlotlyThemes = themes;
+    gd._shinyPlotlyResample = value.resample || null;
     if (themes) {
       gd._shinyPlotlyMode = pageMode(gd);
       figure.layout = figure.layout || {};
@@ -329,15 +439,20 @@
     }
     if (redraw) {
       // The retheme covers a mode that flipped while the draw was in flight.
-      return window.Plotly.react(gd, figure).then(function () { return retheme(gd); });
+      return window.Plotly.react(gd, figure).then(function () {
+        afterSampledDraw(gd);
+        return retheme(gd);
+      });
     }
     return window.Plotly.newPlot(gd, figure).then(function () {
       track(gd);
+      watchView(gd, el.id);
       if (value.events && value.events.length) {
         attachEvents(gd, el.id, value.events, value.max_event_points);
       }
       runPostScript(gd, value.post_script);
       gd._shinyPlotlyDrawn = true;
+      afterSampledDraw(gd);
       return applyPending(el, gd).then(function () { return retheme(gd); });
     });
   }
@@ -461,6 +576,7 @@
 
   function applyUpdate(gd, update) {
     var args = update.args;
+    if (update.method === "resample") return applySample(gd, args);
     if (update.method === "extendTraces" || update.method === "prependTraces") {
       // Both want an array of indices and no maxPoints rather than null.
       if (args[1] === null) args[1] = gd.data.map(function (_, i) { return i; });

@@ -24,6 +24,7 @@ from .apps import (
     make_live_app,
     make_own_mode_app,
     make_post_script_app,
+    make_resample_app,
     make_scoped_theme_app,
     make_theme_app,
 )
@@ -54,6 +55,7 @@ def server_url() -> Iterator[str]:
             Mount("/post-script", app=make_post_script_app()),
             Mount("/held", app=make_held_app()),
             Mount("/arrays", app=make_arrays_app()),
+            Mount("/resample", app=make_resample_app()),
             Mount("/stream", app=load_example("streaming_app.py")),
             Mount("/demo", app=load_example("shinylive/app.py")),
             Mount("/", app=make_app()),

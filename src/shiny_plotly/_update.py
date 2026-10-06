@@ -23,6 +23,7 @@ from plotly.io.json import to_json_plotly
 from shiny.session import Session, require_active_session
 
 from ._validate import as_int, as_positive_int
+from ._views import check_update
 
 __all__ = (
     "add_traces",
@@ -77,6 +78,7 @@ def _traces(traces: Trace | Sequence[Trace]) -> list[Any]:
 
 async def _send(id: str, method: str, args: Sequence[Any], session: Session | None) -> None:
     session = require_active_session(session)
+    check_update(session, session.ns(id), method, args)
     # Serialised by plotly, like the figure itself, so numpy arrays, pandas columns and
     # datetimes in the update are encoded the way plotly.js expects.
     message = {"id": session.ns(id), "method": method, "args": to_json_plotly(list(args))}

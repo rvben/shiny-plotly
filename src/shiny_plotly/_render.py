@@ -17,6 +17,7 @@ from ._deps import plotly_js, shiny_plotly_js
 from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, fill_in_margins
 from ._serve import enable_compressed_plotly_js
 from ._validate import as_positive_int
+from ._views import output_view
 
 __all__ = ("DEFAULT_MAX_EVENT_POINTS", "EVENTS", "output_plotly", "render_plotly")
 
@@ -131,6 +132,26 @@ def normalize_max_event_points(value: int | None) -> int | None:
     return None if value is None else as_positive_int(value, "max_event_points")
 
 
+# The fewest points a trace can be resampled to: its two ends and a few extremes between.
+MIN_RESAMPLE = 10
+
+
+def normalize_resample(value: int | None) -> int | None:
+    """``None``, or a validated point budget, with numpy known to be importable."""
+    if value is None:
+        return None
+    budget = as_positive_int(value, "resample")
+    if budget < MIN_RESAMPLE:
+        raise ValueError(f"resample must be at least {MIN_RESAMPLE}, got {value!r}")
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            "render_plotly(resample=...) needs numpy; install shiny-plotly[resample]"
+        ) from None
+    return budget
+
+
 def output_plotly(id: str, *, width: str | None = None, height: str | None = None) -> Tag:
     """
     Placeholder for a :func:`render_plotly` output. A drop-in for ``output_widget(id)``.
@@ -227,6 +248,21 @@ class render_plotly(Renderer[Figure]):
         data is. At 10 000 points an event is about 1 MB; ``None`` lifts the cap, and a
         selection of 150 000 points or more then exceeds the 16 MB websocket message
         limit uvicorn applies by default, which closes the session.
+    resample
+        Draw long line traces as a sample, refreshed from the full data on zoom and pan.
+        The most points a trace shows at once, 10 or more; ``None`` (the default) sends
+        every point. A ``scatter`` or ``scattergl`` trace with more points than this is
+        drawn as the minimum and maximum of equal-width buckets plus both ends, with a
+        gap wherever the data has one, so spikes and breaks survive; the full data stays
+        in the session on the server, and each zoom or pan (settled for 100 ms) redraws
+        the visible range from it. Point events report original point numbers. A trace
+        that cannot be sampled faithfully (unsorted or non-numeric x, stacked, filled to
+        another trace, per-point error bars, xperiod, an axis with a rangeslider or of
+        category type) is sent whole with a warning saying why. On a resampled output,
+        in-place updates that would put the data and the sample out of step (extending
+        or adding traces, restyling data or per-point attributes of a resampled trace,
+        changing an axis type) raise ``ValueError``; re-render instead. Needs numpy:
+        ``pip install shiny-plotly[resample]``.
     theme
         Make the figure follow the page's color mode, in the browser, with no server
         round-trip. ``"auto"`` uses plotly's own pair: the ``"plotly"`` template in light
@@ -257,6 +293,7 @@ class render_plotly(Renderer[Figure]):
         events: str | Iterable[str] | None = None,
         max_event_points: int | None = DEFAULT_MAX_EVENT_POINTS,
         theme: str | ThemePair | None = None,
+        resample: int | None = None,
     ) -> None:
         self.height = height
         self.width = width
@@ -266,6 +303,7 @@ class render_plotly(Renderer[Figure]):
         self.events = normalize_events(events)
         self.max_event_points = normalize_max_event_points(max_event_points)
         self.theme = normalize_theme(theme)
+        self.resample = normalize_resample(resample)
         # Resolved and serialized once, here, so an unknown name fails at decoration time
         # and a render costs nothing extra.
         self._theme_templates: dict[str, str] = {}
@@ -320,10 +358,54 @@ class render_plotly(Renderer[Figure]):
             sent.update(new)
         return self._theme_keys
 
+    def _output_name(self) -> tuple[Session, str] | None:
+        """The session and namespaced id of this output, when it renders in a real one."""
+        session = get_current_session()
+        if session is None or session.is_stub_session():
+            return None
+        return session, session.ns(self.output_id)
+
+    async def render(self) -> Jsonifiable:
+        # A new render makes every view report about the previous one stale, and lets go
+        # of its full data before the value function runs: a render that returns None or
+        # raises leaves nothing behind.
+        if self.resample is not None:
+            output = self._output_name()
+            if output is not None:
+                state = output_view(*output)
+                state.revision += 1
+                state.sampled = None
+        return await super().render()
+
+    async def _resample(self, fig_dict: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+        """The figure with long traces sampled, and what the browser needs to know of it."""
+        from ._resample import full_index_maps, resample_figure, watch_view
+
+        assert self.resample is not None
+        fig_dict, record = resample_figure(fig_dict, self.resample)
+        if not record.series:
+            return fig_dict, None
+        output = self._output_name()
+        revision = None
+        if output is not None:
+            state = output_view(*output)
+            state.sampled = record
+            revision = state.revision
+            watch_view(*output)
+        # Without a session there is no one to ask for a closer view: the overview stands.
+        return fig_dict, {
+            "revision": revision,
+            "axes": {str(index): axis for index, axis in record.axes.items()},
+            "index_maps": full_index_maps(record),
+        }
+
     async def transform(self, value: Figure) -> Jsonifiable:
         fig_dict = as_fig_dict(value)
         if self.figurewidget_margins:
             fill_in_margins(fig_dict)
+        resampled = None
+        if self.resample is not None:
+            fig_dict, resampled = await self._resample(fig_dict)
         themes_json, theme_keys = self._themes_json, None
         if self._theme_templates:
             # The browser picks the mode's template; the one the figure baked in at
@@ -344,4 +426,5 @@ class render_plotly(Renderer[Figure]):
             "max_event_points": self.max_event_points,
             "themes": themes_json,
             "theme_keys": theme_keys,
+            "resample": resampled,
         }
