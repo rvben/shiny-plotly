@@ -67,18 +67,40 @@ class ExtremaIndex:
         blocks = left[:, None] + np.arange(max(0, int(np.max(right - left))))
         block_valid = blocks < right[:, None]
         blocks = np.minimum(blocks, len(self.low) - 1)
+        # Read the partial edges once, reusing their buffer for minimum and maximum.
+        edge_at = np.concatenate([left_at, right_at], axis=1)
+        edge_valid = np.concatenate([left_valid, right_valid], axis=1)
+        edge_values = self.y[edge_at]
+        edge_valid &= np.isfinite(edge_values)
+        invalid = ~edge_valid
+        np.copyto(edge_values, np.inf, where=invalid)
+        columns = edge_values.argmin(axis=1)
+        edge_low = np.where(edge_valid[rows, columns], edge_at[rows, columns], -1)
+        np.copyto(edge_values, -np.inf, where=invalid)
+        columns = edge_values.argmax(axis=1)
+        edge_high = np.where(edge_valid[rows, columns], edge_at[rows, columns], -1)
         picks = []
-        for extremes, minimum in ((self.low, True), (self.high, False)):
+        for extremes, edge, minimum in ((self.low, edge_low, True), (self.high, edge_high, False)):
+            if blocks.shape[1] == 0:
+                picks.append(edge[edge >= 0])
+                continue
             middle_at = extremes[blocks]
-            at = np.concatenate([left_at, middle_at, right_at], axis=1)
-            valid = np.concatenate(
-                [left_valid, block_valid & (middle_at >= 0), right_valid], axis=1
-            )
-            values = self.y[at]
-            valid &= np.isfinite(values)
-            values = np.where(valid, values, np.inf if minimum else -np.inf)
+            valid = block_valid & (middle_at >= 0)
+            values = self.y[middle_at]
+            sentinel = np.inf if minimum else -np.inf
+            np.copyto(values, sentinel, where=~valid)
             columns = values.argmin(axis=1) if minimum else values.argmax(axis=1)
-            picks.append(at[rows, columns][valid[rows, columns]])
+            middle = np.where(valid[rows, columns], middle_at[rows, columns], -1)
+            # Invalid positions have index -1. Mask their values before comparisons;
+            # ties between valid extrema always take the earlier global index.
+            edge_y = np.where(edge >= 0, self.y[edge], sentinel)
+            middle_y = np.where(middle >= 0, self.y[middle], sentinel)
+            better = middle_y < edge_y if minimum else middle_y > edge_y
+            take_middle = (middle >= 0) & (
+                (edge < 0) | better | ((middle_y == edge_y) & (middle < edge))
+            )
+            selected = np.where(take_middle, middle, edge)
+            picks.append(selected[selected >= 0])
         kept = np.unique(np.concatenate([[start, stop - 1], *picks]))
         if connectgaps or len(self.gaps) == 0:
             return kept
