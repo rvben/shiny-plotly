@@ -65,28 +65,44 @@ def sample(y: Any, budget: int, *, connectgaps: bool = False) -> np.ndarray:
         return np.arange(n)
     finite = np.isfinite(y)
     interior = y[1:-1]
-    # Equal buckets of `width` values, the last padded, as a 2-D array: one vectorised
-    # argmin and argmax over 5M values instead of a Python loop over buckets.
+    # Equal buckets of `width` values: vectorised reductions instead of a Python loop
+    # over buckets. Finite data needs no full-size work buffers or masked copies.
     width = -(-len(interior) // ((budget - 2) // 2))
     count = -(-len(interior) // width)
-    lows = np.full(count * width, np.inf)
-    highs = np.full(count * width, -np.inf)
-    inside = finite[1:-1]
-    lows[: len(interior)] = np.where(inside, interior, np.inf)
-    highs[: len(interior)] = np.where(inside, interior, -np.inf)
-    lows, highs = lows.reshape(count, width), highs.reshape(count, width)
     rows = np.arange(count)
-    low_at, high_at = lows.argmin(axis=1), highs.argmax(axis=1)
-    # A bucket with no finite value has nothing to draw; its gap is found below.
-    has_value = np.isfinite(lows[rows, low_at])
+    all_finite = bool(finite.all())
+    if all_finite:
+        # Full buckets are views; reduce the partial final bucket separately so it
+        # needs no padding. argmin/argmax keep the first occurrence of tied extrema.
+        full = len(interior) // width
+        buckets = interior[: full * width].reshape(full, width)
+        low_at = np.empty(count, dtype=np.intp)
+        high_at = np.empty(count, dtype=np.intp)
+        low_at[:full] = buckets.argmin(axis=1)
+        high_at[:full] = buckets.argmax(axis=1)
+        if full < count:
+            tail = interior[full * width :]
+            low_at[-1], high_at[-1] = tail.argmin(), tail.argmax()
+        has_value = np.ones(count, dtype=bool)
+    else:
+        # Reuse one buffer for both reductions, changing only gaps and padding from
+        # +inf to -inf between them. The original values are never written to.
+        inside = finite[1:-1]
+        work = np.full(count * width, np.inf)
+        np.copyto(work[: len(interior)], interior, where=inside)
+        buckets = work.reshape(count, width)
+        low_at = buckets.argmin(axis=1)
+        # An all-gap bucket contributes no finite extrema; its gap is found below.
+        has_value = np.isfinite(buckets[rows, low_at])
+        work[: len(interior)][~inside] = -np.inf
+        work[len(interior) :] = -np.inf
+        high_at = buckets.argmax(axis=1)
     starts = 1 + rows * width
     extremes = np.concatenate([(starts + low_at)[has_value], (starts + high_at)[has_value]])
     kept = np.unique(np.concatenate([[0, n - 1], extremes]))
-    if connectgaps:
+    if connectgaps or all_finite:
         return kept
     gaps = np.flatnonzero(~finite)
-    if len(gaps) == 0:
-        return kept
     # The first gap after each kept index, where it comes before the next kept index and
     # both are finite: a line only runs between two finite points.
     after = np.searchsorted(gaps, kept[:-1], side="right")

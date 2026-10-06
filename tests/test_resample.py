@@ -2,7 +2,9 @@
 
 import base64
 import datetime
+import math
 import warnings
+from itertools import pairwise
 from typing import Any
 
 import numpy as np
@@ -126,6 +128,58 @@ def test_five_million_points_sample_quickly():
     start = time.perf_counter()
     sample(y, budget=2000)
     assert time.perf_counter() - start < 1.0
+
+
+def reference_sample(y: np.ndarray, budget: int, connectgaps: bool) -> list[int]:
+    """A slow bucket-by-bucket oracle, independent of the vectorised buffer handling."""
+    if len(y) <= budget:
+        return list(range(len(y)))
+    width = math.ceil((len(y) - 2) / ((budget - 2) // 2))
+    kept = {0, len(y) - 1}
+    for start in range(1, len(y) - 1, width):
+        valid = [i for i in range(start, min(start + width, len(y) - 1)) if math.isfinite(y[i])]
+        if valid:
+            kept.add(min(valid, key=lambda i: y[i]))
+            kept.add(max(valid, key=lambda i: y[i]))
+    if not connectgaps:
+        ordered = sorted(kept)
+        for left, right in pairwise(ordered):
+            if math.isfinite(y[left]) and math.isfinite(y[right]):
+                gap = next((i for i in range(left + 1, right) if not math.isfinite(y[i])), None)
+                if gap is not None:
+                    kept.add(gap)
+    return sorted(kept)
+
+
+@pytest.mark.parametrize("kind", ["random", "ties", "gaps", "infinities", "all_gaps", "end_gaps"])
+@pytest.mark.parametrize("strides", ["contiguous", "column", "reversed"])
+def test_sampler_matches_bucket_oracle_and_preserves_readonly_input(kind, strides):
+    rng = np.random.default_rng(42)
+    # Short inputs, exact bucket divisions, a partial last bucket, and odd budgets.
+    for n in (0, 1, 9, 10, 101, 102, 103, 1003):
+        values = rng.normal(size=n)
+        if kind == "ties":
+            values = np.resize(np.array([0.0, -0.0, 2.0, 2.0, -2.0, -2.0]), n)
+        elif kind == "gaps":
+            values[::7] = np.nan
+        elif kind == "infinities":
+            values[::3], values[1::5] = np.inf, -np.inf
+        elif kind == "all_gaps":
+            values[:] = np.nan
+        elif kind == "end_gaps" and n:
+            values[0], values[-1] = np.nan, np.inf
+        if strides == "column":
+            values = np.column_stack([values, values])[:, 0]
+        elif strides == "reversed":
+            values = values[::-1]
+        values.flags.writeable = False
+        before = values.copy()
+        for budget in (10, 11, 102):
+            for connect in (False, True):
+                assert sample(values, budget, connectgaps=connect).tolist() == reference_sample(
+                    values, budget, connect
+                )
+        np.testing.assert_array_equal(values, before)
 
 
 # --- figures: which traces are resampled, and what they carry --------------------------
