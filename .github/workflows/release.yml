@@ -32,7 +32,8 @@ jobs:
         with:
           version: "0.12.5"
           python-version: "3.13"
-          enable-cache: true
+          # This job only reads version metadata; it installs no dependencies.
+          enable-cache: false
 
       - name: Tag matches pyproject.toml
         run: make check-version VERSION="${GITHUB_REF_NAME#v}"

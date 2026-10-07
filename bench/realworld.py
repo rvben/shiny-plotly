@@ -69,7 +69,7 @@ def prepare(cache: Path, name: str, fetch: bool) -> None:
     # Epoch microseconds plus the timezone reconstruct the original timestamps,
     # including both sides of a DST transition. Numeric y arrays keep their dtype.
     dates = index.tz_convert("UTC").tz_localize(None).to_numpy(dtype="datetime64[us]")
-    arrays = {"epoch_us": dates.astype(np.int64)}
+    arrays: dict[str, Any] = {"epoch_us": dates.astype(np.int64)}
     arrays.update({f"y{i}": frame[column].to_numpy() for i, column in enumerate(frame.columns)})
     np.savez(cache / (name + ".npz"), **arrays)
     metadata = {
