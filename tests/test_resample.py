@@ -582,6 +582,20 @@ REFUSED = {
         go.Figure(line()).update_layout(template={"layout": {"xaxis": {"type": "category"}}}),
         "its x axis is of type 'category'",
     ),
+    "numeric date axis": (
+        go.Figure(line()).update_xaxes(type="date"),
+        "numeric date x uses the browser's local timezone",
+    ),
+    "implicit numeric date axis": (
+        go.Figure(go.Scatter(y=np.arange(N), x0=1_700_000_000_000, dx=60_000)).update_xaxes(
+            type="date"
+        ),
+        "numeric date x uses the browser's local timezone",
+    ),
+    "numeric date axis from the template": (
+        go.Figure(line()).update_layout(template={"layout": {"xaxis": {"type": "date"}}}),
+        "numeric date x uses the browser's local timezone",
+    ),
     "text on the same axis": (
         go.Figure([line(), go.Scatter(x=["a", "b"], y=[1, 2])]),
         "also carries text x",
@@ -651,6 +665,65 @@ def test_a_trace_that_cannot_be_sampled_faithfully_is_sent_whole_with_the_reason
     assert len(warned) == 1
     assert warned[0].startswith(f"render_plotly(resample={BUDGET}) sends these traces whole: ")
     assert reason in warned[0]
+
+
+@pytest.mark.parametrize(
+    "dates",
+    [
+        np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[D]"),
+        [datetime.date(2026, 1, 1), datetime.date(2026, 1, 2)],
+        (datetime.datetime(2026, 1, 1), datetime.datetime(2026, 1, 2)),
+        np.array([datetime.date(2026, 1, 1), datetime.date(2026, 1, 2)], dtype=object),
+        [None, datetime.date(2026, 1, 2)],
+        np.array([None, datetime.date(2026, 1, 2)], dtype=object),
+        None,
+    ],
+)
+def test_numeric_series_on_an_inferred_date_axis_is_sent_whole(dates):
+    first = {"x": dates, "y": [0, 1]}
+    if dates is None:
+        first = {"x0": "2026-01-01", "dx": 60_000, "y": [0, 1]}
+    numeric = {"x": np.arange(N) + 1_700_000_000_000, "y": np.arange(N)}
+    sent, record, warned = resampled({"data": [first, numeric]})
+    assert sent["data"][1] is numeric and 1 not in record.series
+    assert "numeric date x uses the browser's local timezone" in warned[0]
+
+
+@pytest.mark.parametrize("axis_type", [None, "linear", "-"])
+@pytest.mark.parametrize("dates", [np.array([], dtype="datetime64[D]"), [None, None]])
+def test_empty_date_trace_does_not_make_a_numeric_axis_a_date_axis(axis_type, dates):
+    fig = {
+        "data": [
+            {"x": dates, "y": []},
+            {"x": np.arange(N), "y": np.arange(N)},
+        ],
+        "layout": {"xaxis": {"type": axis_type}},
+    }
+    _, record, warned = resampled(fig)
+    assert 1 in record.series and warned == []
+
+
+def test_an_explicit_linear_axis_overrides_another_traces_date_hint():
+    fig = {
+        "data": [
+            {"x": np.array(["2026-01-01"], dtype="datetime64[D]"), "y": [0]},
+            {"x": np.arange(N), "y": np.arange(N)},
+        ],
+        "layout": {"xaxis": {"type": "linear"}},
+    }
+    _, record, warned = resampled(fig)
+    assert 1 in record.series and warned == []
+
+
+def test_explicit_date_axes_keep_native_date_sampling_and_zoom_coordinates():
+    dates = np.datetime64("2026-03-28T00:00:00.123456") + np.arange(N) * np.timedelta64(1, "s")
+    fig = go.Figure(go.Scatter(x=dates, y=np.sin(np.arange(N)))).update_xaxes(type="date")
+    _, record, warned = resampled(fig)
+    assert warned == []
+    series = record.series[0]
+    kept = series.pick(BUDGET, (series.coords[50] + 500, series.coords[70] + 500))
+    np.testing.assert_array_equal(kept, np.arange(50, 72))
+    np.testing.assert_array_equal(series.arrays["x"][kept], dates[50:72])
 
 
 def test_one_warning_names_every_refused_trace():

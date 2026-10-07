@@ -868,3 +868,83 @@ def make_defer_app() -> App:
             await extend_traces("far_plain", {"y": [[99]]}, indices=0)
 
     return App(app_ui, server)
+
+
+DATE_COUNT = 10_000
+DATE_SPIKE = 4321
+
+
+def make_date_steps_app() -> App:
+    """Native dates and x0/dx coordinates, with identical unsampled data."""
+    indices = np.arange(DATE_COUNT)
+    dates = np.datetime64("2026-03-28T00:00:00.123456") + indices * np.timedelta64(1, "m")
+    y = np.sin(indices / 100)
+    y[DATE_SPIKE] = 50
+    y[4000:4010] = np.nan
+    app_ui = ui.page_fluid(
+        ui.input_action_button("shift", "Shift"),
+        ui.output_text("steps_click_out"),
+        output_plotly("native", height="300px", width="600px"),
+        output_plotly("steps", height="300px", width="600px"),
+    )
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        def plot(*, explicit: bool) -> go.Figure:
+            return go.Figure(
+                go.Scattergl(
+                    x=dates if explicit else None,
+                    x0=None if explicit else str(dates[0]),
+                    dx=None if explicit else 60_000,
+                    y=y + input.shift(),
+                    customdata=indices,
+                    mode="lines+markers",
+                    hovertemplate="%{x|%Y-%m-%d %H:%M:%S.%L}: %{y}<extra></extra>",
+                )
+            ).update_layout(uirevision="keep", xaxis={"type": "date"}, showlegend=False)
+
+        @render_plotly(events="click")
+        def native():
+            return plot(explicit=True)
+
+        @render_plotly(events="click")
+        def steps():
+            return plot(explicit=False)
+
+        @render.text
+        def steps_click_out():
+            if not input.steps_click.is_set():
+                return "-"
+            return json.dumps(input.steps_click()["points"][0])
+
+    return App(app_ui, server)
+
+
+def make_numeric_date_app() -> App:
+    """Numeric date data must stay whole: browser-local offsets cannot be sampled on server."""
+    dates = np.datetime64("2026-03-28T00:00:00.123456") + np.arange(DATE_COUNT) * np.timedelta64(
+        1, "m"
+    )
+    x = dates.astype("datetime64[us]").astype(np.int64) / 1000.0
+    y = np.sin(np.arange(DATE_COUNT) / 100)
+    y[DATE_SPIKE] = 50
+
+    def server(input: Inputs, output: Outputs, session: Session):
+        @render_plotly(resample=200, events="click")
+        def numeric():
+            return go.Figure(
+                go.Scattergl(x=x, y=y, customdata=np.arange(DATE_COUNT), mode="lines+markers")
+            ).update_xaxes(type="date")
+
+        @render.text
+        def numeric_click_out():
+            if not input.numeric_click.is_set():
+                return "-"
+            return json.dumps(input.numeric_click()["points"][0])
+
+    return App(
+        ui.page_fluid(
+            output_plotly("numeric", width="600px", height="300px"),
+            ui.output_text("numeric_click_out"),
+        ),
+        server,
+    )

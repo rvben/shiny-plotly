@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Resampling sends numeric x values on a date axis (explicit or inferred from another native-date trace) whole with a warning. Plotly interprets those numbers in the browser's local timezone, so server-side sampling could return the wrong time window, especially across daylight-saving transitions.
+
 ## [0.5.0](https://github.com/rvben/shiny-plotly/compare/v0.4.3...v0.5.0) - 2026-10-07
 
 ### Added

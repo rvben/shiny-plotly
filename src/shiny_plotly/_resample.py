@@ -241,6 +241,19 @@ def _is_categorical(x: Any) -> bool:
     return any(isinstance(v, (str, bytes, list, tuple, np.ndarray)) for v in x)
 
 
+def _has_dates(value: Any) -> bool:
+    """A conservative date-axis hint for native inputs, without copying arrays."""
+    if isinstance(value, np.ndarray):
+        value = value.flat
+    return (
+        isinstance(value, (list, tuple, np.flatiter))
+        and len(value) > 0
+        and isinstance(
+            next((v for v in value if v is not None), None), (datetime.date, np.datetime64)
+        )
+    )
+
+
 @dataclass
 class Series:
     """The full data of one resampled trace."""
@@ -465,6 +478,11 @@ def resample_figure(
         (_x_axis(t), _y_axis(t)) for t in data if str(t.get("fill") or "").startswith("tonext")
     }
     text_axes = {_x_axis(t) for t in data if _is_categorical(t.get("x"))}
+    date_axes = {
+        _x_axis(t)
+        for t in data
+        if _has_dates(t.get("x")) or isinstance(t.get("x0"), (str, datetime.date, np.datetime64))
+    }
     refused: list[str] = []
     for index, trace in enumerate(data):
         if trace.get("type", "scatter") not in ("scatter", "scattergl"):
@@ -477,6 +495,14 @@ def resample_figure(
             if fig_dict.get("frames") or local_data:
                 raise Ineligible("animation frames or local controls can replace its data")
             _check_trace(trace, layout, fill_linked, text_axes, local_axis_paths)
+            axis_type = _axis_layout(layout, series.axis).get("type")
+            if series.arrays["x"].dtype.kind in "iuf" and (
+                axis_type == "date" or (axis_type in (None, "-") and series.axis in date_axes)
+            ):
+                # Plotly interprets numeric date data in the browser's local
+                # timezone, unlike date strings. Server coordinates cannot
+                # predict its offsets (which can change at DST boundaries).
+                raise Ineligible("numeric date x uses the browser's local timezone")
             series.y_axis = _y_axis(trace)
         except Ineligible as reason:
             refused.append(f"trace {index} ({reason})")
