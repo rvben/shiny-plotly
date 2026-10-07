@@ -7,22 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Resampling converts object timestamps in bulk when pandas 2 or newer is already loaded, retaining Plotly's wall-clock date semantics, including mixed offsets and nonexistent DST times. Unsupported dates keep the element-wise fallback.
-- Owned figure snapshots avoid reconstructing immutable date elements, while keeping array/list buffers, mutable custom data, date subclasses and custom timezone state independently copied. pandas remains optional.
-
-### Added
-
-- A many-trace example using explicit targeted updates, plus checksum-pinned real-world server benchmarks and a browser comparison of targeted updates against full re-renders. Downloaded fixtures and generated results stay outside the repository.
-
-## [0.5.0](https://github.com/rvben/shiny-plotly/compare/v0.4.3...v0.5.0) - 2026-10-06
+## [0.5.0](https://github.com/rvben/shiny-plotly/compare/v0.4.3...v0.5.0) - 2026-10-07
 
 ### Added
 
 - `output_plotly(defer_offscreen=True)` postpones redraws of already drawn graphs more than 200px outside the viewport. Waiting figures draw one at a time when the browser is idle, or sooner on scrolling near, pointer entry, or focus. Only the latest waiting figure and its subsequent updates are retained. Waiting outputs carry an overridable, delayed `shiny-plotly-stale` indicator. First draws, empty values, and errors are not deferred. Off by default.
 - `window.shinyPlotly.flush()` draws waiting figures and awaits active browser redraws, queued updates, and resizing. It rejects on failure; a new figure clears the failure, and subsequent updates are dropped with a warning until then. It does not wait for server resampling answers requested by a preserved zoom. Native printing starts a best-effort refresh.
 - `render_plotly(resample=N)` draws long `scatter` and `scattergl` traces as a sample of at most N finite points plus gap markers and keeps the full data in the session on the server. Each zoom or pan redraws the visible range from the full data, so the detail is there at every zoom while the page receives a few thousand points instead of millions. The sample is the minimum and maximum of equal-width buckets, both ends and every gap, so spikes survive and gaps are never bridged. Point events report positions in the full data, and per-point attributes such as `customdata` and `marker.color` are sliced with the points. A trace that cannot be sampled faithfully is sent whole, with a warning saying why, and in-place updates that would put the data and the drawn sample out of step raise `ValueError`. Needs numpy: `pip install shiny-plotly[resample]`.
+- A many-trace example using explicit targeted updates, plus checksum-pinned real-world server benchmarks and a browser comparison of targeted updates against full re-renders. Downloaded fixtures and generated results stay outside the repository.
 
 ### Changed
 
@@ -31,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resampling reuses the renderer's owned float64 snapshots and checks sorted coordinates without allocating their differences. Caller-owned arrays and log-axis masking retain independent copies.
 - Repeated broad zooms and pans of very long traces build a small, exact extrema index lazily. Initial draws, narrow views, and densely gapped data retain the direct sampler; indexed views preserve the same spikes, ties, gaps, and point indices.
 - Fully missing long traces keep their endpoints without allocating extrema buffers or enumerating every gap.
+- Resampling converts object timestamps in bulk when pandas 2 or newer is already loaded, retaining Plotly's wall-clock date semantics, including mixed offsets and nonexistent DST times. Unsupported dates keep the element-wise fallback.
+- Owned figure snapshots avoid reconstructing immutable date elements, while keeping array/list buffers, mutable custom data, date subclasses and custom timezone state independently copied. pandas remains optional.
 
 ### Fixed
 
