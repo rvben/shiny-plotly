@@ -162,7 +162,10 @@ def axis_coordinates(x: np.ndarray, *, copy: bool = True) -> np.ndarray:
     if x.dtype.kind == "M":
         if np.isnat(x).any():
             raise Ineligible("x holds a missing date (NaT)")
-        return x.astype("datetime64[us]").astype(np.int64) / 1000.0
+        # A microsecond array already holds epoch integers. Reinterpret that
+        # buffer instead of copying it twice; division still owns the float
+        # coordinates, so even a caller-owned or read-only x stays untouched.
+        return x.astype("datetime64[us]", copy=False).view(np.int64) / 1000.0
     if x.dtype.kind == "O" and all(isinstance(v, (datetime.date, np.datetime64)) for v in x):
         # Pandas is already loaded when an app supplies Timestamp objects. Do not
         # import it just to sample stdlib dates, or make it a required dependency.

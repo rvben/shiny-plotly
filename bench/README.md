@@ -5,6 +5,16 @@ comparisons. Server transform time and browser interaction latency are different
 measurements. Results go to stdout; --output writes a local JSON artifact. Keep
 downloaded fixtures and generated results outside Git.
 
+The synthetic sampler benchmark can use native microsecond or nanosecond dates:
+
+    make bench-resample BENCH_ARGS="--points 5000000 --date-unit us --repeats 15"
+
+`--date-unit ns` checks the unit-conversion path with the same one-second readings
+starting at 2026-01-01; omitting the option keeps numeric x.
+View timings use the resulting date-axis coordinates and verify that lazy indexing
+preserves the direct sampler's complete payload. These are server measurements,
+not browser interaction timings.
+
 ## Real recordings
 
 The sources in realworld.py are pinned to GitHub commits and SHA256 checksums:

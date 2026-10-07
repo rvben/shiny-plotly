@@ -851,6 +851,35 @@ def test_as_array_reads_plotlys_binary_arrays_in_any_shape():
     assert np.array_equal(as_array(as_list_shape), grid)
 
 
+@pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
+@pytest.mark.parametrize("storage", ["contiguous", "column", "reversed", "big_endian"])
+def test_native_date_coordinates_preserve_units_strides_and_independent_ownership(unit, storage):
+    from shiny_plotly._resample import axis_coordinates
+
+    x = np.array(["1969-12-31T23:59:59", "1970-01-01", "2026-01-01"], dtype=f"datetime64[{unit}]")
+    expected = np.array([-1000.0, 0.0, 1_767_225_600_000.0])
+    if storage == "column":
+        x = np.column_stack([x, x])[:, 0]
+    elif storage == "reversed":
+        x, expected = x[::-1], expected[::-1]
+    elif storage == "big_endian":
+        x = x.astype(x.dtype.newbyteorder(">"))
+    before = x.copy()
+    x.flags.writeable = False
+    coordinates = axis_coordinates(x, copy=False)
+    np.testing.assert_array_equal(coordinates, expected)
+    assert not np.shares_memory(x, coordinates)
+    coordinates[:] = 0
+    np.testing.assert_array_equal(x, before)
+
+
+def test_native_nanosecond_dates_keep_submicrosecond_rounding_before_the_epoch():
+    from shiny_plotly._resample import axis_coordinates
+
+    x = np.array([-1001, -1, 1, 1001], dtype=np.int64).view("datetime64[ns]")
+    np.testing.assert_array_equal(axis_coordinates(x), [-0.002, -0.001, 0.0, 0.001])
+
+
 @pytest.mark.parametrize(
     "dates",
     [
