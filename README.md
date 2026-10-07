@@ -179,6 +179,21 @@ exactly the same points faster. Initial draws and
 narrow views use the direct sampler, and densely gapped traces skip indexing. The full
 data and any index belong to the session and are replaced when the output re-renders.
 
+### Regular date series
+
+For an unsampled, evenly spaced date series, Plotly's native `x0`/`dx` representation avoids sending and parsing every timestamp. Supply the first date as a string, the interval in milliseconds, and explicitly set a date axis:
+
+```python
+fig = go.Figure(go.Scattergl(x0="2026-01-01T00:00:00.123456", dx=60_000, y=values, mode="lines"))
+fig.update_xaxes(type="date")
+```
+
+The y value at position i represents i minutes after `x0`; missing readings must remain in y as gaps so subsequent dates stay aligned. Date hover formatting, date-string zoom ranges, and point indices retain their normal behavior. The graph data and export describe x with `x0`/`dx` rather than an explicit x array. Use explicit timestamps for irregular intervals and for date-series resampling: `resample=` currently sends date-string `x0` traces whole with a warning.
+
+Numeric epoch coordinates are not an equivalent shortcut: Plotly interprets them in the browser's local timezone and rounds numeric coordinates to 0.1 ms. Their display can differ across browsers, and server-side resampling cannot predict those offsets. Numeric x on a date axis (explicit or inferred from another native-date trace) is therefore sent whole with a warning. Date strings and native datetime arrays retain Plotly's wall-clock semantics.
+
+`make bench-drawing` compares sampling, trace grouping, SVG versus WebGL, and `x0`/`dx` on pinned real datasets. [The benchmark guide](bench/README.md) explains the tradeoffs and captures browser CPU profiles.
+
 ### Migrating from shinywidgets
 
 | shinywidgets | shiny-plotly |

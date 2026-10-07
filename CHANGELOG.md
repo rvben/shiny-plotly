@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Browser drawing benchmarks with separate CPU/timeline captures, native regular-date controls, sampling and trace-count comparisons. The regular-date recipe uses Plotly’s native `x0`/`dx`; browser tests cover date hover, gaps, zoom, point-event mapping and zoom preservation in multiple browser timezones.
+
 ### Fixed
 
 - Resampling sends numeric x values on a date axis (explicit or inferred from another native-date trace) whole with a warning. Plotly interprets those numbers in the browser's local timezone, so server-side sampling could return the wrong time window, especially across daylight-saving transitions.

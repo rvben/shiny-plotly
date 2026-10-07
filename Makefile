@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-events bench-resample bench-realworld bench-updates check version check-version release-notes publish clean \
+	check-floor bench bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
 	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -107,6 +107,9 @@ bench-realworld:
 
 bench-updates:
 	uv run python -m bench.updates $(BENCH_ARGS)
+
+bench-drawing:
+	uv run python -m bench.drawing $(BENCH_ARGS)
 
 # Pinned: the demo build runs only in the Pages workflow, so a shinylive release
 # could break the deploy with no CI run ever having seen it. Bump deliberately.

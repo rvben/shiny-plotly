@@ -62,3 +62,67 @@ leave unchanged traces on the client and avoid a full-figure message. They do
 not promise a redraw proportional to the changed trace: Plotly may recalculate
 other traces. Resampled outputs still reject data updates that would invalidate
 their retained full data; re-render those outputs instead.
+
+
+## Browser drawing and profiles
+
+    make bench-drawing BENCH_ARGS="--cases stocks_gl stocks_sampled power_regular power_regular_steps --repeats 7 --output /tmp/drawing.json --profiles /tmp/plotly-profiles"
+    make bench-updates BENCH_ARGS="--case power_regular_steps --repeats 7 --profiles /tmp/shiny-profiles"
+
+Both browser benchmarks default to Playwright's `channel="chromium"` (new headless
+mode), using its downloaded Chrome for Testing rather than system Chrome. Run
+`make browsers` to install it. Results record the Chromium version, Plotly.js
+version, pixel ratio and WebGL renderer. `--headless-shell` reproduces Playwright's
+older shell; it may use SwiftShader software rendering. Compare results only on
+the same renderer and browser mode. Software-rendered WebGL can be dramatically
+slower than a hardware-backed browser.
+
+`bench.drawing` prepares payloads with the real renderer, then calls Plotly
+in a standalone page. Its timers exclude Shiny, transport, JSON parsing and
+construction of changed arrays. It measures promise completion, not GPU completion
+or time to a physically presented frame. A separate two-animation-frame duration
+is reported; it is a browser rendering checkpoint, not a GPU completion fence.
+React timings include Plotly’s binary-array decoding, while update passes an already
+constructed JavaScript array. The sampled cases are prepared overview
+snapshots: they compare browser drawing cost, without a Shiny session or zoom
+resampling. They do not permit data updates on a live sampled output.
+`bench.updates` covers the real Shiny path, including server work and transfer.
+
+Timing runs alternate operation order after warmup. For cross-case conclusions,
+repeat the comparison with the case order reversed as well; results record that order. Profiled operations run
+separately afterward; their durations are not used as latency evidence. Open
+`.cpuprofile` files in Chrome DevTools' Performance panel and `.trace.json` files
+in Perfetto. Captures continue through two animation frames after the operation,
+so they include deferred layout and paint. CPU samples locate JavaScript work; browser
+traces include layout and paint work. Profiles and result files remain local.
+
+The cases deliberately change application choices:
+
+- `stocks_gl` and `stocks_svg` retain all 505 series and 619,040 stock points.
+- `stocks_sampled` uses a 200-point finite budget per series; this changes the
+  overview approximation rather than making a full 619,040-point redraw faster.
+- `stocks_grouped` puts 50 identically styled series in each trace, with a missing
+  point between series and stock names in `customdata`. It retains all stock
+  points but changes trace identity and individual series controls. The stock
+  cases share one line color and width for a fair grouping comparison.
+- `stocks_fixed` fixes the y range, sacrificing autorange as an explicit control.
+- The power and building cases retain three sensor series. Sampled variants use
+  a 2000-point finite budget; extra missing-value markers can exceed that budget.
+- `power_regular` and `power_regular_steps` select the same longest constant-cadence
+  interval in the meter recording (47,908 one-minute readings per series). The
+  latter uses a date-string `x0` and millisecond `dx` instead of explicit timestamps.
+  No readings are added or dropped within that interval. This is an unsampled
+  application representation control, not a faster draw of the entire recording.
+
+The Shiny benchmark also accepts `--case power_regular` and
+`--case power_regular_steps`. They change the same first series and title;
+`stocks` remains its default. Numeric epoch-date prototypes were rejected:
+Plotly treats numeric dates as browser-local time and rounds fractional milliseconds,
+so their apparent speedup did not preserve coordinate and zoom semantics.
+Also check the recorded Plotly.js versions before comparing different benchmarks;
+they must match.
+
+Use sampling for long series, explicit updates for unchanged traces, and a date
+representation suited to the application. Measure SVG versus WebGL on the actual
+workload. Group traces only where separate trace identities and controls are not
+needed. None of these choices is applied automatically by the package.
