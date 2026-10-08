@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-compression bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
+	check-floor bench bench-compression bench-first-plot bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
 	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -90,11 +90,15 @@ check: lock-check lint typecheck test test-browser check-wheel check-floor
 bench:
 	uv run python -m bench.run $(BENCH_ARGS)
 
-# Measures what a selected event costs on a dense trace, capped by max_event_points and
-# uncapped (bench/events.py); the numbers behind that option's default.
+# Local navigation-to-chart timing, including browser HTTP cache and throttling.
+bench-first-plot:
+	uv run python -m bench.first_plot $(FIRST_PLOT_ARGS)
+
+# Fresh-worker compression readiness and first asset request latency.
 bench-compression:
 	uv run python -m bench.compression $(COMPRESSION_ARGS)
 
+# Measures selected-event cost on a dense trace with and without event caps.
 bench-events:
 	uv run python -m bench.events $(BENCH_ARGS)
 

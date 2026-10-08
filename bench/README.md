@@ -136,3 +136,43 @@ Use sampling for long series, explicit updates for unchanged traces, and a date
 representation suited to the application. Measure SVG versus WebGL on the actual
 workload. Group traces only where separate trace identities and controls are not
 needed. None of these choices is applied automatically by the package.
+
+
+## First visible chart
+
+    make bench-first-plot FIRST_PLOT_ARGS="--basic-bundle /path/to/plotly-basic.min.js --rounds 3 --output /tmp/first-plot.json"
+
+Use a basic dist bundle matching `plotly.offline.get_plotlyjs_version()`; the
+package validates its version and trace registrations. Install Playwright Chromium
+with `make browsers`. The default uses downloaded Chrome for Testing in new
+headless mode; `--headless-shell` selects the installed headless shell.
+
+This measures the complete local Shiny startup path from navigation start to three
+nonzero SVG bars followed by two animation frames. It includes HTTP downloads,
+JavaScript parsing/evaluation, session initialization, figure serialization and
+drawing. The checkpoint allows a rendering opportunity; it does not prove physical
+screen presentation or GPU completion. Server imports, startup and compression are
+outside the timer: compression is explicitly ready before navigation.
+
+Each round compares full and basic bundles on the same three-bar figure, with
+normal conditions and CDP emulation of 4x CPU slowdown, 80 ms latency, 1.6 Mbps
+download and 0.75 Mbps upload. These are synthetic controls, not a calibrated
+physical device or a WAN simulation. CDP HTTP throttling does not establish
+WebSocket bandwidth limits. Bundle and throttle order alternate across rounds.
+Use an idle machine and compare the same Chromium mode and dependency versions.
+
+Every cold/warm pair has a new isolated browser context. Warm navigates away and
+back while retaining its HTTP cache; it includes cached Shiny assets as well as
+Plotly. The script checks resource timing to prove that Plotly transferred bytes
+on cold visits and came from HTTP cache on warm visits. It also checks chart
+values and page/output errors. HTTP cache warmth may also affect Chromium's code
+cache, so it is not a pure network-only control.
+
+Stdout reports medians; optional JSON includes every sample, versions, emulation
+settings, DOM and rendering checkpoints, Plotly resource duration and encoded,
+decoded and transfer sizes. Transfer size includes HTTP headers. The interval
+from Plotly response end to chart DOM is also recorded: it includes remaining
+browser/session/render work, not isolated parse time. Downloads and CPU work can
+overlap; do not subtract resource duration from the total to infer CPU cost.
+All servers, processes, contexts and temporary server caches are cleaned up.
+Results remain local and should not be committed.
