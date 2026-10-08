@@ -176,3 +176,18 @@ browser/session/render work, not isolated parse time. Downloads and CPU work can
 overlap; do not subtract resource duration from the total to infer CPU cost.
 All servers, processes, contexts and temporary server caches are cleaned up.
 Results remain local and should not be committed.
+
+Add `--profiles /tmp/first-plot-profiles` to capture warm-cache startup under
+throttling for both bundles. These are separate diagnostic runs after the timing
+rounds; their timings never enter the reported medians. The browser first primes
+its HTTP cache, then captures navigation through the chart rendering checkpoint
+as a `.cpuprofile` and `.trace.json`. Open them in Chrome DevTools and Perfetto,
+respectively. The optional result JSON records capture paths and a summary of
+script evaluation by URL, layout/paint/parser events and CPU samples by source.
+Diagnostic-only markers identify Shiny connection and the Plotly.newPlot call;
+the result records its promise duration as well.
+Some Chromium builds emit negative profiler sample deltas: the summary omits
+them and records their count instead of reporting negative execution costs.
+Trace categories overlap and sampled leaf times are not inclusive CPU costs;
+use the timeline to distinguish execution from network waits. Profiling itself
+adds overhead, so establish any speedup with separate unprofiled timing runs.

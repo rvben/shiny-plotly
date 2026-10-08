@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,29 @@ OBSERVER = """(() => {
         }));
     });
     observer.observe(document, {childList:true, subtree:true, attributes:true});
+})();"""
+
+
+# Diagnostic instrumentation only, installed after the cold visit primes cache.
+# DOMContentLoaded precedes Shiny's asynchronous session initialization.
+PROFILE_MARKS = """(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.jQuery) window.jQuery(document).on('shiny:connected', () => {
+            performance.mark('startup-shiny-connected');
+        });
+        if (!window.Plotly) throw Error('Plotly unavailable for startup profiling');
+        const original = Plotly.newPlot;
+        Plotly.newPlot = function(...args) {
+            performance.mark('startup-newplot-start');
+            const result = original.apply(this, args);
+            result.then(() => {
+                performance.mark('startup-newplot-end');
+                performance.measure('startup-newplot',
+                    'startup-newplot-start', 'startup-newplot-end');
+            }, () => performance.mark('startup-newplot-error'));
+            return result;
+        };
+    });
 })();"""
 
 
@@ -115,7 +139,45 @@ def running_server(directory: Path, bundle: Path | None):
         raise RuntimeError(f"server exited with {process.exitcode}")
 
 
-def pair(browser: Browser, url: str, throttled: bool) -> list[dict[str, Any]]:
+def profile_summary(paths: dict[str, Any]) -> dict[str, Any]:
+    """Summarize a separate diagnostic capture; durations are not latency samples."""
+    trace = json.loads(Path(paths["timeline"]).read_text())["traceEvents"]
+    scripts: Counter[str] = Counter()
+    rendering: Counter[str] = Counter()
+    for event in trace:
+        if event.get("ph") != "X":
+            continue
+        duration = event.get("dur", 0) / 1000
+        if event["name"] == "EvaluateScript":
+            scripts[event.get("args", {}).get("data", {}).get("url", "unknown")] += duration
+        elif event["name"] in ("Layout", "UpdateLayoutTree", "Paint", "ParseHTML"):
+            rendering[event["name"]] += duration
+    profile = json.loads(Path(paths["cpu_profile"]).read_text())
+    frames = {node["id"]: node["callFrame"] for node in profile["nodes"]}
+    sampled: Counter[str] = Counter()
+    negative_deltas = 0
+    for sample, delta in zip(
+        profile.get("samples", []), profile.get("timeDeltas", []), strict=True
+    ):
+        # Some Chromium builds emit occasional non-monotonic profiler samples.
+        # Do not turn them into negative execution costs; expose the count.
+        if delta < 0:
+            negative_deltas += 1
+            continue
+        frame = frames[sample]
+        sampled[frame["url"] or frame["functionName"]] += delta / 1000
+    return {
+        "evaluate_script_ms": dict(scripts),
+        "rendering_events_ms": dict(rendering),
+        "sampled_leaf_ms": dict(sampled.most_common()),
+        "negative_sample_deltas": negative_deltas,
+        "scope": "profiled run; categories overlap; leaf samples are not inclusive CPU costs",
+    }
+
+
+def pair(
+    browser: Browser, url: str, throttled: bool, profile: Path | None = None
+) -> list[dict[str, Any]]:
     context = browser.new_context(viewport={"width": 1000, "height": 750})
     try:
         context.add_init_script(OBSERVER)
@@ -138,8 +200,19 @@ def pair(browser: Browser, url: str, throttled: bool) -> list[dict[str, Any]]:
         page.on("pageerror", lambda error: errors.append(str(error)))
         rows = []
         for phase in ("cold", "warm"):
-            page.goto(url, wait_until="commit", timeout=60_000)
-            page.wait_for_function("Number.isFinite(window.firstPlotPaintMs)")
+
+            def navigate() -> None:
+                page.goto(url, wait_until="commit", timeout=60_000)
+                page.wait_for_function("Number.isFinite(window.firstPlotPaintMs)")
+
+            paths = None
+            if profile is not None and phase == "warm":
+                from .drawing import capture
+
+                context.add_init_script(PROFILE_MARKS)
+                paths = capture(page, navigate, profile)
+            else:
+                navigate()
             row = page.evaluate("""() => {
                 const resources = performance.getEntriesByType('resource').filter(
                     r => new URL(r.name).pathname.endsWith('/plotly.min.js'));
@@ -155,13 +228,21 @@ def pair(browser: Browser, url: str, throttled: bool) -> list[dict[str, Any]]:
                     plotly_transfer_bytes:r.transferSize,
                     plotly_encoded_bytes:r.encodedBodySize, plotly_decoded_bytes:r.decodedBodySize,
                     plotly_cached:r.transferSize === 0 && r.decodedBodySize > 0,
-                    plotly_js:Plotly.version};
+                    plotly_js:Plotly.version,
+                    startup_marks:performance.getEntriesByType('mark').map(
+                        m => ({name:m.name, start_ms:m.startTime})),
+                    newplot_ms:performance.getEntriesByName(
+                        'startup-newplot')[0]?.duration ?? null};
             }""")
             if errors:
                 raise RuntimeError(f"browser errors: {errors}")
             if row["plotly_cached"] != (phase == "warm"):
                 raise RuntimeError(f"unexpected {phase} browser cache state: {row}")
             row["phase"] = phase
+            if paths is not None:
+                if row["newplot_ms"] is None:
+                    raise RuntimeError("startup profile did not capture Plotly.newPlot")
+                row["profile"] = {**paths, "summary": profile_summary(paths)}
             rows.append(row)
             # A fresh document navigation retains HTTP cache without reload's
             # revalidation semantics. This also terminates the old Shiny session.
@@ -176,6 +257,7 @@ def main() -> None:
     parser.add_argument("--basic-bundle", type=Path, required=True)
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--profiles", type=Path, help="Separate warm/throttled diagnostic captures")
     parser.add_argument("--headless-shell", action="store_true")
     args = parser.parse_args()
     if args.rounds < 1:
@@ -184,6 +266,7 @@ def main() -> None:
     if not bundle.is_file():
         parser.error("--basic-bundle must name an existing matching Plotly.js bundle")
     samples: list[dict[str, Any]] = []
+    profiles: dict[str, Any] = {}
     with (
         tempfile.TemporaryDirectory(prefix="shiny-first-plot-") as directory,
         sync_playwright() as pw,
@@ -208,6 +291,11 @@ def main() -> None:
                                         "round": index,
                                     }
                                 )
+            if args.profiles:
+                for variant, path in (("full", None), ("basic", bundle)):
+                    with running_server(Path(directory) / variant, path) as url:
+                        rows = pair(browser, url, True, args.profiles / f"{variant}-warm-throttled")
+                        profiles[variant] = rows[-1]
         finally:
             browser.close()
     result = {
@@ -226,10 +314,14 @@ def main() -> None:
         },
         "scope": "navigation to three SVG bars plus two rAF; server compression already ready",
         "samples": samples,
+        "profiles": profiles,
     }
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(f"Chromium {version}; medians of {args.rounds} rounds; server compression ready.")
+    if profiles:
+        for variant, row in profiles.items():
+            print(f"{variant} diagnostic capture: {row['profile']['timeline']}")
     print("bundle | mode | cache | chart checkpoint ms | Plotly download ms | transfer bytes")
     for variant in ("full", "basic"):
         for throttled in (False, True):
