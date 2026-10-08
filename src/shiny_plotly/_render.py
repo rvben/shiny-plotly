@@ -15,6 +15,7 @@ from shiny.session import Session, get_current_session
 from shiny.types import SilentCancelOutputException, SilentOperationInProgressException
 from shiny.ui.fill import as_fill_item, as_fillable_container
 
+from ._bundle import check_figure
 from ._deps import plotly_js, shiny_plotly_js
 from ._html import DEFAULT_CONFIG, Figure, as_fig_dict, encode_figure_arrays, fill_in_margins
 from ._serve import enable_compressed_plotly_js
@@ -437,6 +438,7 @@ class render_plotly(Renderer[Figure]):
 
     async def transform(self, value: Figure) -> Jsonifiable:
         fig_dict = as_fig_dict(value, preserve_arrays=self.resample is not None)
+        check_figure(fig_dict)
         if self.figurewidget_margins:
             fill_in_margins(fig_dict)
         resampled = None

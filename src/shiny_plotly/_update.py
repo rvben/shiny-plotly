@@ -22,6 +22,7 @@ from typing import Any
 from plotly.io.json import to_json_plotly
 from shiny.session import Session, require_active_session
 
+from ._bundle import check_style, check_trace_types, trace_types
 from ._validate import as_int, as_positive_int
 from ._views import check_update
 
@@ -73,6 +74,7 @@ def _traces(traces: Trace | Sequence[Trace]) -> list[Any]:
     out = [_trace_json(t) for t in ([traces] if one else list(traces))]
     if not out:
         raise ValueError("add_traces needs at least one trace")
+    check_trace_types(trace_types(out))
     return out
 
 
@@ -181,6 +183,7 @@ async def restyle(
     ``{"opacity": [0.5, 1]}`` with ``indices=[0, 1]``. Array attributes take a list of
     arrays, one per trace: ``{"y": [[1, 2, 3]]}``.
     """
+    check_style(update)
     await _send(id, "restyle", [update, _indices(indices)], session)
 
 
@@ -220,6 +223,7 @@ async def update(
     """
     if restyle is None and relayout is None:
         raise ValueError("update needs restyle or relayout (or both)")
+    check_style(restyle)
     args: list[Any] = [restyle or {}, relayout or {}]
     if indices is not None:
         args.append(_indices(indices))

@@ -5,6 +5,8 @@ from importlib.metadata import version
 import plotly
 from htmltools import HTMLDependency
 
+from ._bundle import selected_bundle
+
 __all__ = ("__version__", "plotly_js", "shiny_plotly_js")
 
 __version__ = version("shiny-plotly")
@@ -12,11 +14,11 @@ __version__ = version("shiny-plotly")
 
 def plotly_js() -> HTMLDependency:
     """
-    The plotly.js bundle, served by Shiny straight from the installed ``plotly`` wheel.
+    The process-wide plotly.js dependency, served locally by Shiny.
 
     Shiny serves HTML dependencies under ``/lib/<name>-<version>/``, so the URL is keyed
     by the installed plotly version and caches correctly across deploys. Nothing is
-    copied or written: the dependency points at ``plotly/package_data/plotly.min.js``,
+    copied or written for the default bundle: it points at ``plotly/package_data/plotly.min.js``,
     the exact bundle ``plotly.offline.get_plotlyjs()`` would inline.
 
     Every :func:`~shiny_plotly.output_plotly` and every :func:`~shiny_plotly.fig_to_ui`
@@ -25,9 +27,21 @@ def plotly_js() -> HTMLDependency:
     later (``ui.insert_ui``, a ``@render.ui`` that starts empty) and the bundle should load
     with the page instead.
 
-    Once a session has rendered a figure, the bundle is served pre-compressed with an
-    immutable cache lifetime; see :mod:`shiny_plotly._serve`.
+    After :func:`~shiny_plotly.use_plotly_bundle` (or SHINY_PLOTLY_BUNDLE), this
+    carries a private snapshot instead. Its version includes the variant and content
+    digest, so changing its bytes changes its immutable URL. The first call fixes the
+    choice for the process. The bundle is served compressed and immutable from the
+    first request; see :mod:`shiny_plotly._serve`.
     """
+    selected = selected_bundle()
+    if selected is not None:
+        bundle, directory = selected
+        return HTMLDependency(
+            name="plotly",
+            version=f"{plotly.__version__}+{bundle.local_version}",
+            source={"subdir": str(directory)},
+            script={"src": "plotly.min.js"},
+        )
     return HTMLDependency(
         name="plotly",
         version=plotly.__version__,

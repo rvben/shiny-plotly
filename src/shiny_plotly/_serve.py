@@ -33,6 +33,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, Response
 from starlette.routing import Route
 
+from ._bundle import selection_settled
 from ._deps import plotly_js
 
 __all__ = (
@@ -243,7 +244,8 @@ def enable_compressed_plotly_js(app: object) -> bool:
     before the import, and it is what each session calls for its own app.
 
     Returns True when the route was added, False when it was already there, ``app`` is
-    not a Shiny app, or ``SHINY_PLOTLY_NO_COMPRESS`` is set in the environment (the escape
+    not a Shiny app, no plotly dependency has fixed the bundle choice yet, or
+    ``SHINY_PLOTLY_NO_COMPRESS`` is set in the environment (the escape
     hatch for deployments that want Shiny's own static serving untouched). Under pyodide
     (shinylive) it is False too: threads cannot start there, and the browser loads assets
     from the shinylive bundle rather than over HTTP, so there is nothing to compress.
@@ -253,6 +255,10 @@ def enable_compressed_plotly_js(app: object) -> bool:
     starlette_app = getattr(app, "starlette_app", None)
     lib_prefix = getattr(app, "lib_prefix", None)
     if starlette_app is None or not isinstance(lib_prefix, str):
+        return False
+    # An unrelated app must not lock in the full bundle. Dependency registration
+    # below installs the route when a callable or dynamic UI first asks for plotly.
+    if not selection_settled():
         return False
     routes = starlette_app.router.routes
     with _enable_lock:
@@ -272,16 +278,19 @@ def enable_compressed_plotly_js(app: object) -> bool:
 
 # Marks the wrapper below, so a second import (or a module reload) wraps nothing twice.
 _WRAPPED = "_shiny_plotly_wrapped"
+_INITIALIZING = "_shiny_plotly_initializing"
 
 
 def enable_for_new_apps() -> bool:
     """
     Serve the compressed bundle from every ``shiny.App`` built from now on.
 
-    Wraps ``shiny.App.__init__`` once, at import of this package, and enables the route on
-    each app it builds. Shiny offers a package no other hook into an app that early, and
-    early is the point: the browser asks for plotly.min.js while the page is loading, long
-    before the session that page opens exists, so a route installed by the first session is
+    Wraps ``shiny.App.__init__`` and dependency registration once, at import of this
+    package. The constructor enables apps with plotly dependencies; later registration
+    covers callable and dynamically inserted UI without settling unrelated apps.
+    These hooks run before any dependency request, which matters: the browser asks
+    for plotly.min.js while the page is loading, long before the session exists, so a
+    route installed by the first session is
     installed one visitor too late. Express constructs the same ``App``, so it is covered too.
 
     Returns True when the wrapper was installed, False when it was already there.
@@ -292,16 +301,33 @@ def enable_for_new_apps() -> bool:
     if getattr(original, _WRAPPED, False):
         return False
 
-    @functools.wraps(original)
-    def __init__(self: App, *args: Any, **kwargs: Any) -> None:
-        original(self, *args, **kwargs)
+    def try_enable(app: App) -> None:
         try:
-            enable_compressed_plotly_js(self)
+            enable_compressed_plotly_js(app)
         except Exception:
-            # This app never asked for the route, so nothing here may keep it from being
-            # built; without it the bundle is served by Shiny's own mount, as before.
+            # Compression is optional; Shiny can still serve the dependency itself.
             logger.warning("shiny-plotly could not serve plotly.min.js compressed", exc_info=True)
 
+    @functools.wraps(original)
+    def __init__(self: App, *args: Any, **kwargs: Any) -> None:
+        setattr(self, _INITIALIZING, True)
+        try:
+            original(self, *args, **kwargs)
+        finally:
+            delattr(self, _INITIALIZING)
+        try_enable(self)
+
+    register_dependency = App._register_web_dependency
+
+    @functools.wraps(register_dependency)
+    def _register_web_dependency(self: App, dep: Any) -> None:
+        register_dependency(self, dep)
+        if dep.name == "plotly" and not getattr(self, _INITIALIZING, False):
+            # The constructor handles initial dependencies once, after setup finishes.
+            # Later dependencies need their route before the response.
+            try_enable(self)
+
+    App._register_web_dependency = _register_web_dependency
     setattr(__init__, _WRAPPED, True)
     App.__init__ = __init__
     return True

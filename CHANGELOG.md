@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `use_plotly_bundle(path)` and `SHINY_PLOTLY_BUNDLE` select a partial or custom plotly.js dist bundle matching the installed plotly's target version. The process-wide choice is fixed by the first plotly dependency, and the validated bytes are served from a private snapshot under a variant- and content-keyed URL with the existing compression and immutable caching.
+- Figures, animation frames, `fig_to_ui` fragments, added traces and trace-type updates are checked against the selected bundle's trace types. Missing types raise `ValueError` on the server, including types in NumPy updates and explicit resets to scatter.
+
+### Added
+
 - Browser drawing benchmarks with separate CPU/timeline captures, native regular-date controls, sampling and trace-count comparisons. The regular-date recipe uses Plotly’s native `x0`/`dx`; browser tests cover date hover, gaps, zoom, point-event mapping and zoom preservation in multiple browser timezones.
 
 ### Changed

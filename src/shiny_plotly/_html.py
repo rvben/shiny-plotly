@@ -11,6 +11,7 @@ from _plotly_utils import utils as plotly_utils
 from htmltools import HTML, Tag, TagList, css, tags
 from plotly.basedatatypes import BaseFigure
 
+from ._bundle import check_figure
 from ._deps import plotly_js, shiny_plotly_js
 from ._serve import enable_for_current_session
 from ._snapshot import snapshot
@@ -82,6 +83,7 @@ def fig_to_ui(
         return None
     enable_for_current_session()
     fig_dict = as_fig_dict(fig)
+    check_figure(fig_dict)
     if figurewidget_margins:
         fill_in_margins(fig_dict)
     if div_id is None:

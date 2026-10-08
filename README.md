@@ -465,6 +465,52 @@ An app constructed before `shiny_plotly` is imported is the one case the constru
 
 If a reverse proxy in front of the app does its own compression and caching, or you want Shiny's static serving untouched for any reason, set `SHINY_PLOTLY_NO_COMPRESS=1` in the app's environment: no route is added, and `enable_compressed_plotly_js` returns `False`.
 
+### A partial plotly.js bundle
+
+For dashboards that use only a few trace types, a partial plotly.js bundle reduces the
+JavaScript the browser downloads and evaluates. The `basic` bundle includes scatter,
+bar and pie. Select it at the top of the app file, before building any plotly output,
+`fig_to_ui` fragment or explicit `plotly_js()` dependency:
+
+```python
+from shiny_plotly import use_plotly_bundle
+
+use_plotly_bundle("plotly-basic.min.js")
+```
+
+Alternatively, set `SHINY_PLOTLY_BUNDLE=/path/to/plotly-basic.min.js` in the app's
+environment. An explicit call takes precedence. The choice applies to the whole process
+and is fixed by its first plotly dependency; choosing the same content again is harmless.
+Constructing an unrelated Shiny app does not fix the choice.
+
+The bundle must match the plotly.js version the installed plotly targets. Download that
+version, rather than the latest release:
+
+```sh
+v=$(python -c "from plotly.offline import get_plotlyjs_version; print(get_plotlyjs_version())")
+curl -fsSLo plotly-basic.min.js "https://cdn.jsdelivr.net/npm/plotly.js-basic-dist-min@$v/plotly-basic.min.js"
+```
+
+A mismatched version raises `ValueError` with the expected version and download URL.
+Other partial bundles, such as `cartesian`, `finance` and `geo`, and custom dist builds
+work the same way. Custom builds must be rebuilt when plotly's target version changes;
+keep their plotly.js version banner and trace-module metadata intact.
+
+The file is read and validated once when chosen. The exact bytes are copied into a private
+temporary directory, so Shiny never exposes neighboring app files, and later changes or
+removal of the original file cannot change what is served. The dependency URL includes the
+variant and a SHA-256 digest, `/lib/plotly-<version>+basic.<digest>/plotly.min.js`. It uses
+the same compressed, immutable route as the full bundle, including for callable UI.
+With `SHINY_PLOTLY_NO_COMPRESS=1`, Shiny serves the same private copy without that route.
+
+Every rendered figure and `fig_to_ui` fragment, including animation frames, is checked
+against the trace types found in the bundle. The same check covers `add_traces` and type
+changes sent through `restyle` or `update`, including NumPy arrays. A missing type raises
+`ValueError`, naming the missing types and listing those available; render errors appear
+in the output. An untyped trace defaults to scatter. An omitted frame type inherits the
+trace it animates; an explicit `None` type resets to scatter, as does a type reset in
+`restyle` or `update`.
+
 ### Shinylive
 
 Apps using `shiny-plotly` run under [Shinylive](https://shiny.posit.co/py/get-started/shinylive.html) (pyodide in the browser) as well; list `shiny-plotly` in the app's `requirements.txt` next to `plotly`. There is no HTTP server in the browser and pyodide cannot start threads, so the compression route above stands down under pyodide (`enable_compressed_plotly_js` returns `False`); everything else, rendering, events, in-place updates and themes, is browser-side already. Verified against a real `shinylive export`; `examples/shinylive/` is a ready-to-export app, and its deployed copy is the [live demo](https://rvben.github.io/shiny-plotly/). The Pages workflow builds that demo from the current checkout's wheel (`make site`) and deploys only after a headless Chromium has watched both tabs render (`make site-check`).

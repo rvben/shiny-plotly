@@ -1,5 +1,6 @@
 """Render plotly figures in Shiny for Python without the shinywidgets layer."""
 
+from ._bundle import use_plotly_bundle
 from ._deps import __version__, plotly_js, shiny_plotly_js
 from ._html import FIGUREWIDGET_MARGINS, fig_to_ui
 from ._render import DEFAULT_MAX_EVENT_POINTS, output_plotly, render_plotly
@@ -31,6 +32,7 @@ __all__ = (
     "restyle",
     "shiny_plotly_js",
     "update",
+    "use_plotly_bundle",
 )
 
 # From here on every app serves plotly.min.js compressed and immutable, from its first
