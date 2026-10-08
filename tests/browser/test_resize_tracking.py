@@ -49,6 +49,9 @@ def test_resize_ownership_survives_rerender(
         });""")
     page.goto(server_url + "/")
     expect(page.locator("#fig .bars .point")).to_have_count(3)
+    # SVG nodes appear before Plotly finishes installing the responsive handler.
+    # Resize only after the helper has completed the draw and assigned ownership.
+    page.wait_for_function("document.querySelector('#fig .plotly-graph-div')._shinyPlotlyDrawn")
     if not observer:
         page.set_viewport_size({"width": 1150, "height": 800})
     wait_until_graph_matches_container(page, "fig")

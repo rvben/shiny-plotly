@@ -6,13 +6,33 @@ import pytest
 from playwright.sync_api import Page, expect
 
 pytestmark = pytest.mark.browser
+# The real example has 100 WebGL traces; software rendering with the oldest
+# Plotly can take more than Playwright's default 30 seconds to finish a draw.
+DRAW_TIMEOUT_MS = 60_000
+
+
+def watch_updates(page: Page) -> None:
+    # Large WebGL redraws on the oldest Plotly can outlast locator assertions.
+    # Observe completion of the actual update before inspecting its SVG title.
+    page.evaluate("""() => {
+        window.completedUpdates = 0;
+        const update = Plotly.update;
+        Plotly.update = function(...args) {
+            const result = update.apply(this, args);
+            result.then(() => window.completedUpdates++);
+            return result;
+        };
+    }""")
 
 
 def test_one_trace_changes_without_rerendering_or_losing_the_zoom(
     page: Page, server_url: str, errors: list[str]
 ):
-    page.goto(server_url + "/many/")
-    page.wait_for_function("document.getElementById('chart-plotly')?._shinyPlotlyDrawn")
+    page.goto(server_url + "/many/", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "document.getElementById('chart-plotly')?._shinyPlotlyDrawn", timeout=DRAW_TIMEOUT_MS
+    )
+    watch_updates(page)
     page.evaluate("""async () => {
         const gd = document.getElementById('chart-plotly');
         await Plotly.relayout(gd, {'xaxis.range':[100,200]});
@@ -23,7 +43,8 @@ def test_one_trace_changes_without_rerendering_or_losing_the_zoom(
         Shiny.setInputValue('series', 3);
         Shiny.setInputValue('offset', 1);
     }""")
-    page.click("#apply")
+    page.click("#apply", no_wait_after=True)
+    page.wait_for_function("completedUpdates === 1", timeout=DRAW_TIMEOUT_MS)
     expect(page.locator("#chart .gtitle")).to_have_text("Changed series 3")
     state = page.evaluate("""() => {
         const gd = document.getElementById('chart-plotly');
@@ -44,12 +65,16 @@ def test_one_trace_changes_without_rerendering_or_losing_the_zoom(
 def test_invalid_series_does_not_disconnect_and_a_valid_update_still_works(
     page: Page, server_url: str, errors: list[str], invalid: str
 ):
-    page.goto(server_url + "/many/")
-    page.wait_for_function("document.getElementById('chart-plotly')?._shinyPlotlyDrawn")
+    page.goto(server_url + "/many/", wait_until="domcontentloaded")
+    page.wait_for_function(
+        "document.getElementById('chart-plotly')?._shinyPlotlyDrawn", timeout=DRAW_TIMEOUT_MS
+    )
+    watch_updates(page)
     page.fill("#series", invalid)
-    page.click("#apply")
+    page.click("#apply", no_wait_after=True)
     expect(page.locator(".shiny-notification")).to_contain_text("Choose a whole-number series")
     page.fill("#series", "3")
-    page.click("#apply")
+    page.click("#apply", no_wait_after=True)
+    page.wait_for_function("completedUpdates === 1", timeout=DRAW_TIMEOUT_MS)
     expect(page.locator("#chart .gtitle")).to_have_text("Changed series 3")
     assert errors == []

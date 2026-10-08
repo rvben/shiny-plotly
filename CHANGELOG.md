@@ -7,18 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/rvben/shiny-plotly/compare/v0.5.0...v0.6.0) - 2026-10-08
+
 ### Added
 
 - `output_plotly(..., coalesce_renders=True)` keeps only the latest waiting browser redraw, including visible charts, and yields between draws to receive newer snapshots. Active draws and their trace updates finish in order; `flush()` waits for queued work and reports failures. The option combines with offscreen deferral and is disabled by default.
-
 - Compressed plotly.js encodings persist in a bounded, transactional cache shared across local workers and restarts. Warm starts serve cached encodings immediately, with content- and codec-keyed ETags. `SHINY_PLOTLY_CACHE_DIR` sets the location and `SHINY_PLOTLY_NO_CACHE=1` disables persistence; unavailable storage falls back to background compression.
-
 - `use_plotly_bundle(path)` and `SHINY_PLOTLY_BUNDLE` select a partial or custom plotly.js dist bundle matching the installed plotly's target version. The process-wide choice is fixed by the first plotly dependency, and the validated bytes are served from a private snapshot under a variant- and content-keyed URL with the existing compression and immutable caching.
 - Figures, animation frames, `fig_to_ui` fragments, added traces and trace-type updates are checked against the selected bundle's trace types. Missing types raise `ValueError` on the server, including types in NumPy updates and explicit resets to scatter.
-
-### Added
-
-- Browser drawing benchmarks with separate CPU/timeline captures, native regular-date controls, sampling and trace-count comparisons. The regular-date recipe uses Plotly’s native `x0`/`dx`; browser tests cover date hover, gaps, zoom, point-event mapping and zoom preservation in multiple browser timezones.
+- Browser benchmarks measure cold and warm startup through the first chart, burst redraws, and normal reactive dashboards with native slider debounce and animation. Drawing profiles include separate CPU/timeline captures, native regular-date controls, sampling and trace-count comparisons. The regular-date recipe uses Plotly’s native `x0`/`dx`; browser tests cover date hover, gaps, zoom, point-event mapping and zoom preservation in multiple browser timezones.
 
 ### Changed
 
