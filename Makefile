@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-compression bench-first-plot bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
+	check-floor bench bench-compression bench-first-plot bench-dashboard bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
 	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -93,6 +93,10 @@ bench:
 # Local navigation-to-chart timing, including browser HTTP cache and throttling.
 bench-first-plot:
 	uv run python -m bench.first_plot $(FIRST_PLOT_ARGS)
+
+# Many-chart redraws, offscreen deferral and native/observer resize request counts.
+bench-dashboard:
+	uv run python -m bench.dashboard $(DASHBOARD_ARGS)
 
 # Fresh-worker compression readiness and first asset request latency.
 bench-compression:

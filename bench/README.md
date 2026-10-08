@@ -191,3 +191,40 @@ them and records their count instead of reporting negative execution costs.
 Trace categories overlap and sampled leaf times are not inclusive CPU costs;
 use the timeline to distinguish execution from network waits. Profiling itself
 adds overhead, so establish any speedup with separate unprofiled timing runs.
+
+
+## Many-chart dashboards
+
+    make bench-dashboard DASHBOARD_ARGS="--charts 20 --points 500 --repeats 5 --output /tmp/dashboard.json"
+
+This runs real Shiny dashboards with four compact columns and two taller columns,
+with offscreen deferral enabled and disabled. Charts contain identical-sized SVG
+line traces and all draw once before timing begins. Timed refreshes change every
+trace and title; the script waits for Plotly.react promises, then checks all drawn
+values. It reports input-to-visible-chart time through two animation frames and
+input-to-all-charts time, including server work and local WebSocket transport.
+The checkpoint is not a physical screen-presentation or GPU-completion guarantee.
+
+The default uses native idle scheduling and a 4x CPU emulation control. With
+`--hold-idle`, background callbacks are deliberately held until flush: this
+isolates foreground work rather than simulating normal browser idle behavior.
+The all-chart measurement always flushes waiting redraws, so deferred work is
+counted. First draws are never deferred. Four compact columns put the default
+20 charts in the viewport; the tall layout has charts below the fold. Larger
+chart counts can put charts below the fold in either layout; the actual visible
+count is recorded per sample.
+
+Two viewport changes count both the helper's observer resize requests and
+Plotly's native resize handler invocations, then verify every graph's dimensions.
+They also record relayout events and the number of native handlers still attached.
+Request counts are not redraw counts: Plotly can debounce duplicate requests.
+Resize elapsed times include a 150 ms settling period and are diagnostics, not
+latency comparisons. The benchmark instruments event listeners and Plotly calls;
+it is intended for comparisons with the same instrumentation.
+
+One refresh warms each case before sampling. Repeat with `--reverse-order` to
+check case-order effects; `--cpu 1` removes CPU emulation and `--headless-shell`
+selects Playwright's older shell. Use the same browser mode and an idle machine.
+Optional JSON records every sample, draw/resize counts and the case order. Results
+are local artifacts and should remain outside Git. This benchmark does not time
+cold asset downloads or server compression.

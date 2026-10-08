@@ -597,3 +597,17 @@ def test_own_draw_failure_preserves_later_outputs_and_remains_observable(app: Pa
     )
     assert len(errors) == 1 and "intentional own failure" in errors[0]
     errors.clear()
+
+
+def test_window_resize_does_not_redraw_a_waiting_offscreen_figure(app: Page):
+    set_n(app, 4)
+    before = value(app, f"{gd('far')}._fullLayout.width")
+    app.evaluate("document.getElementById('far').style.width = '400px'")
+    app.set_viewport_size({"width": 800, "height": 700})
+    # Plotly's responsive resize is debounced; allow it time to expose a stray handler.
+    app.wait_for_timeout(250)
+    assert value(app, f"{gd('far')}._fullLayout.width") == before
+    assert value(app, trace_y("far", 0)) == [1, 2, 3]
+    app.evaluate("() => shinyPlotly.flush()")
+    wait_for(app, f"{gd('far')}._fullLayout.width", 400)
+    wait_for(app, trace_y("far", 0), [1, 2, 3, 4])

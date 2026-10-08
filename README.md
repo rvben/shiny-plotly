@@ -217,7 +217,7 @@ The rules mirror `output_widget`:
 - `height=None` (default): the plot fills its container. Inside `ui.card(full_screen=True)`, a fillable page or a sidebar layout it grows and shrinks with the card, from a 400px basis. Outside a fill layout it is 400px tall.
 - `height="300px"` (on the decorator or on `output_plotly`): the plot is exactly that tall and opts out of filling.
 
-Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a small helper script (`shiny-plotly.js`, loaded with every output) that observes each graph's container with a `ResizeObserver`, so a card that changes size without a window resize, for example when a sibling output renders below it, or when a sidebar collapses, re-lays the graph out. The same helper purges a graph once it leaves the document, which releases the window listener and layout state plotly would otherwise keep.
+Plotly alone re-measures a graph only on window resize. `shiny-plotly` ships a small helper script (`shiny-plotly.js`, loaded with every output) that observes each graph's container with a `ResizeObserver`, so a card that changes size without a window resize, for example when a sibling output renders below it, or when a sidebar collapses, re-lays the graph out. When `ResizeObserver` is available, it handles both container and viewport changes and replaces Plotly's per-chart window listener, avoiding duplicate resize requests. Plotly's native listener remains the fallback without an observer. The same helper purges a graph once it leaves the document, releasing its layout state and any fallback listener.
 
 ### Many charts on one page
 

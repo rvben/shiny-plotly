@@ -56,7 +56,16 @@
     if (observer === null && typeof ResizeObserver === "function") {
       observer = new ResizeObserver(onResize);
     }
-    if (observer !== null) observer.observe(gd);
+    if (observer !== null) {
+      observer.observe(gd);
+      // The observer covers viewport and container changes. Plotly's per-graph window
+      // handler would schedule the same resize again and bypass off-screen deferral.
+      // Retain its identity: Plotly checks this field before installing a handler on
+      // internal redraws, and clears it when responsive is disabled or the graph purged.
+      if (gd._responsiveChartHandler) {
+        window.removeEventListener("resize", gd._responsiveChartHandler);
+      }
+    }
   }
 
   function release(gd) {
@@ -686,6 +695,7 @@
       // The retheme covers a mode that flipped while the draw was in flight.
       return window.Plotly.react(gd, figure).then(function () {
         if (!gd.isConnected || graphDiv(el) !== gd) { release(gd); return; }
+        track(gd); // react can install a new responsive handler after a config change
         afterSampledDraw(gd);
         return retheme(gd);
       });
