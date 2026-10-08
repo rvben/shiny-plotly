@@ -825,7 +825,7 @@ def make_resample_app() -> App:
     return App(app_ui, server)
 
 
-def make_defer_app() -> App:
+def make_defer_app(*, coalesce_renders: bool = False) -> App:
     """An on-screen chart and three below the fold, sharing an input."""
     app_ui = ui.page_fluid(
         ui.input_dark_mode(id="mode", mode="light"),
@@ -833,10 +833,16 @@ def make_defer_app() -> App:
         ui.input_switch("fail", "Fail", value=False),
         ui.input_switch("hide", "Hide", value=False),
         ui.input_action_button("tick", "tick"),
-        output_plotly("near", height="150px", defer_offscreen=True),
+        output_plotly(
+            "near", height="150px", defer_offscreen=True, coalesce_renders=coalesce_renders
+        ),
         ui.div(style="height: 3000px"),
-        output_plotly("far", height="150px", defer_offscreen=True),
-        output_plotly("far_next", height="150px", defer_offscreen=True),
+        output_plotly(
+            "far", height="150px", defer_offscreen=True, coalesce_renders=coalesce_renders
+        ),
+        output_plotly(
+            "far_next", height="150px", defer_offscreen=True, coalesce_renders=coalesce_renders
+        ),
         output_plotly("far_plain", height="150px"),
     )
 

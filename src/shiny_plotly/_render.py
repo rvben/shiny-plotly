@@ -161,6 +161,7 @@ def output_plotly(
     width: str | None = None,
     height: str | None = None,
     defer_offscreen: bool = False,
+    coalesce_renders: bool = False,
 ) -> Tag:
     """
     Placeholder for a :func:`render_plotly` output. A drop-in for ``output_widget(id)``.
@@ -174,6 +175,14 @@ def output_plotly(
     It is fill-aware: inside ``ui.card(full_screen=True)`` or a fillable page the plot
     grows and shrinks with its container. Passing ``height`` fixes the output's height
     instead (the plot fills that height), the same rule ``output_widget`` follows.
+
+    With ``coalesce_renders=True``, redraws run through a browser queue that keeps only
+    the latest waiting figure. A draw already started finishes with its trace updates;
+    a newer waiting figure replaces the previous one and its updates. The queue yields
+    between draws so incoming figures can supersede obsolete work. First draws, empty
+    values and server errors remain immediate. Await ``window.shinyPlotly.flush()``
+    before reading graph data; asynchronous draw failures are logged and reject that
+    promise. This can be combined with ``defer_offscreen=True``.
 
     With ``defer_offscreen=True``, an already drawn graph more than 200px outside the
     viewport keeps its previous figure until the browser is idle or the output comes
@@ -192,6 +201,7 @@ def output_plotly(
         class_="shiny-plotly-output",
         style=css(width=width, height=height),
         data_shiny_plotly_defer="" if defer_offscreen else None,
+        data_shiny_plotly_coalesce="" if coalesce_renders else None,
     )
     # The graph inside fills the output, so the output is a fillable container on every
     # page; these helpers bring the fill CSS, which a plain page does not carry by itself.

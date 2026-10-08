@@ -663,3 +663,8 @@ def test_bundle_and_helper_are_served_from_the_output_tag_without_a_page_level_c
 def test_output_plotly_defer_offscreen_is_opt_in():
     assert output_plotly("sales", defer_offscreen=True).attrs["data-shiny-plotly-defer"] == ""
     assert "data-shiny-plotly-defer" not in output_plotly("sales").attrs
+
+
+def test_output_plotly_coalesce_renders_is_opt_in():
+    assert output_plotly("sales", coalesce_renders=True).attrs["data-shiny-plotly-coalesce"] == ""
+    assert "data-shiny-plotly-coalesce" not in output_plotly("sales").attrs

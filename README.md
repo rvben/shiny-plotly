@@ -237,6 +237,25 @@ First draws, empty values, and server errors are never deferred. The server stil
 
 A waiting output carries `shiny-plotly-stale` until its redraw and queued updates finish. It dims after half a second, using a zero-specificity CSS rule. Override it in your app to change the indicator, for example `.shiny-plotly-stale { opacity: 1; }`.
 
+Rapid inputs can also send a new figure before the browser has drawn the previous one.
+Opt in to coalesce waiting redraws, including charts in the viewport:
+
+```python
+output_plotly("sales", coalesce_renders=True)
+# Combine both policies for long dashboards:
+output_plotly("history", coalesce_renders=True, defer_offscreen=True)
+```
+
+The queue keeps the latest waiting figure and yields between browser draws so incoming
+snapshots can replace obsolete work. A draw already started finishes with its trace
+updates; replacing a waiting figure discards that figure and its subsequent updates.
+Updates sent after the replacement apply to it in order. First draws, empty values and
+server errors stay immediate. This reduces browser work during bursts; it still renders
+and sends every figure on the server, and cannot interrupt a Plotly draw already running.
+Leave it disabled when every intermediate figure must be drawn. Client draw failures are
+logged and retained for `flush()` to report; a new figure can recover. Queued outputs use
+the same stale indicator as offscreen outputs.
+
 Code that reads graph data, such as a button exporting all charts, must first await `window.shinyPlotly.flush()`. For opted-in outputs, it draws waiting figures, waits for redraws already running, and resolves after their queued updates and resizing finish. It rejects if drawing or an update fails; a new figure clears that failure. Updates arriving after a failure are dropped with a warning until a new figure arrives, so a stream cannot build an unusable queue. The promise covers browser draws; it does not wait for server resampling answers requested by a preserved zoom. A resampled figure may still show its overview while that answer is in flight, so `flush()` alone cannot guarantee zoom detail in an export. For a snapshot of the figures currently available in the browser before programmatic printing:
 
 ```js

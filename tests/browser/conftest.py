@@ -58,6 +58,7 @@ def server_url() -> Iterator[str]:
             Mount("/post-script", app=make_post_script_app()),
             Mount("/held", app=make_held_app()),
             Mount("/defer", app=make_defer_app()),
+            Mount("/coalesce", app=make_defer_app(coalesce_renders=True)),
             Mount("/arrays", app=make_arrays_app()),
             Mount("/resample", app=make_resample_app()),
             Mount("/date-steps", app=make_date_steps_app()),

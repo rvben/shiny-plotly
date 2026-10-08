@@ -228,3 +228,28 @@ selects Playwright's older shell. Use the same browser mode and an idle machine.
 Optional JSON records every sample, draw/resize counts and the case order. Results
 are local artifacts and should remain outside Git. This benchmark does not time
 cold asset downloads or server compression.
+
+### Snapshot bursts
+
+```sh
+make bench-burst BURST_ARGS="--repeats 5 --output /tmp/burst.json"
+make bench-burst BURST_ARGS="--hold-first-ms 250 --output /tmp/burst-held.json"
+```
+
+`bench/burst.py` sends five fixed full-figure snapshots, 20ms apart, over the actual
+Shiny WebSocket to 20 charts with 500 SVG points each. It compares
+`coalesce_renders=False/True` on four compact columns and on two tall columns with
+offscreen deferral. The stacked cases hold idle callbacks until `flush()` to isolate
+waiting-figure replacement; they are a controlled case, not native idle scheduling.
+The first draw is warmed before measurement. Every sample verifies receipt of all
+snapshots, final data in every graph and absence of browser errors, then measures
+all-chart completion through flush and two animation frames. Case order reverses on
+alternate repeats. Results include dependency/browser versions, raw samples, draw
+counts, first/last-chart revisions and draws started after a newer snapshot arrived.
+
+`--hold-first-ms` pauses the first redraw before delegating to Plotly to expose
+asynchronous backpressure; that artificial wait is included in the timing. Draws of
+older snapshots are only counted as obsolete at start if the raw socket listener had
+already received a newer revision. CPU throttling (`--cpu 4` by default) is a synthetic
+control, not a device prediction. Change `--charts`, `--points`, `--snapshots`,
+`--interval-ms` and `--repeats` to match the workload. Keep generated results local.

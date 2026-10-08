@@ -390,6 +390,7 @@
   var deferredOutputs = new Set();
   var viewWatcher = null;
   var removalWatcher = null;
+  var readyScheduled = false;
   var drainScheduled = false;
   var drainRunning = false;
   var viewScheduled = false;
@@ -470,7 +471,8 @@
     if (!state || !state.waiting || (!force && deferrable(el))) return;
     state.waiting.ready = true;
     stopWatching(el);
-    reportDraw(el, settleDeferred(el, false));
+    if (coalesces(el)) scheduleReady();
+    else reportDraw(el, settleDeferred(el, false));
   }
 
   function watchWaiting(el) {
@@ -502,6 +504,7 @@
       forgetDeferred(el);
       el.classList.remove("shiny-plotly-stale");
     }
+    scheduleReady();
     scheduleDrain();
   }
 
@@ -565,6 +568,31 @@
     return Promise.resolve();
   }
 
+  function coalesces(el) {
+    return el.hasAttribute("data-shiny-plotly-coalesce");
+  }
+
+  // Yield between visible redraws so WebSocket messages can replace waiting snapshots.
+  // A timer progresses in hidden tabs too, where animation frames may be suspended.
+  // Start one output per turn; moving it to the back in startDeferred keeps this fair.
+  function scheduleReady() {
+    if (readyScheduled) return;
+    var candidate = function (el) {
+      var state = el._shinyPlotlyDeferred;
+      return coalesces(el) && state.waiting && state.waiting.ready && !state.active;
+    };
+    if (!Array.from(deferredOutputs).some(candidate)) return;
+    readyScheduled = true;
+    setTimeout(function () {
+      readyScheduled = false;
+      var el = Array.from(deferredOutputs).find(candidate);
+      if (!el) return;
+      if (!el.isConnected) cancelDeferred(el);
+      else reportDraw(el, startDeferred(el));
+      scheduleReady();
+    }, 0);
+  }
+
   function renderDeferred(el, value) {
     var state = deferredState(el);
     state.error = null;
@@ -572,10 +600,17 @@
     // started finish with that draw; the replacement then overwrites them normally.
     var pending = !state.waiting && !state.active ? el._shinyPlotlyPending : null;
     el._shinyPlotlyPending = null;
-    state.waiting = { value: value, ready: !deferrable(el),
+    state.waiting = { value: value,
+      ready: !el.hasAttribute("data-shiny-plotly-defer") || !deferrable(el),
       cancelled: false, _shinyPlotlyPending: pending };
     rememberDeferred(el);
     if (state.waiting.ready) {
+      var gd = graphDiv(el);
+      if (coalesces(el) && gd && gd._shinyPlotlyDrawn) {
+        el.classList.add("shiny-plotly-stale");
+        scheduleReady();
+        return;
+      }
       var promise = settleDeferred(el, false);
       reportDraw(el, promise);
       // Shiny awaits output bindings serially. Retain the failure for flush(), but
@@ -593,7 +628,7 @@
     if (drainScheduled || drainRunning) return;
     var candidate = Array.from(deferredOutputs).some(function (el) {
       var state = el._shinyPlotlyDeferred;
-      return state.waiting && !state.active;
+      return state.waiting && !state.active && !(coalesces(el) && state.waiting.ready);
     });
     if (!candidate) return;
     drainScheduled = true;
@@ -601,7 +636,7 @@
       drainScheduled = false;
       var el = Array.from(deferredOutputs).find(function (output) {
         var state = output._shinyPlotlyDeferred;
-        return state.waiting && !state.active;
+        return state.waiting && !state.active && !(coalesces(output) && state.waiting.ready);
       });
       if (!el) return;
       if (!el.isConnected) { cancelDeferred(el); scheduleDrain(); return; }
@@ -888,7 +923,9 @@
     };
     binding.renderValue = function (el, value) {
       if (value !== null && value !== undefined &&
-          el.hasAttribute("data-shiny-plotly-defer")) return renderDeferred(el, value);
+          (el.hasAttribute("data-shiny-plotly-defer") || coalesces(el))) {
+        return renderDeferred(el, value);
+      }
       cancelDeferred(el);
       return draw(el, value);
     };
