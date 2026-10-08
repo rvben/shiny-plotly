@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-compression bench-first-plot bench-dashboard bench-burst bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
+	check-floor bench bench-compression bench-first-plot bench-dashboard bench-burst bench-reactive-dashboard bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
 	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -100,6 +100,9 @@ bench-dashboard:
 
 bench-burst:
 	uv run python -m bench.burst $(BURST_ARGS)
+
+bench-reactive-dashboard:
+	uv run python -m bench.reactive_dashboard $(REACTIVE_DASHBOARD_ARGS)
 
 # Fresh-worker compression readiness and first asset request latency.
 bench-compression:

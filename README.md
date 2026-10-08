@@ -252,9 +252,13 @@ updates; replacing a waiting figure discards that figure and its subsequent upda
 Updates sent after the replacement apply to it in order. First draws, empty values and
 server errors stay immediate. This reduces browser work during bursts; it still renders
 and sends every figure on the server, and cannot interrupt a Plotly draw already running.
-Leave it disabled when every intermediate figure must be drawn. Client draw failures are
-logged and retained for `flush()` to report; a new figure can recover. Queued outputs use
-the same stale indicator as offscreen outputs.
+
+Coalescing helps when incoming figures outpace browser drawing. A debounced slider may
+already send only the final figure, leaving no draws to skip; queueing can add settling
+delay in that case. Leave it disabled when every intermediate figure must be drawn.
+
+Client draw failures are logged and retained for `flush()` to report; a new figure can
+recover. Queued outputs use the same stale indicator as offscreen outputs.
 
 Code that reads graph data, such as a button exporting all charts, must first await `window.shinyPlotly.flush()`. For opted-in outputs, it draws waiting figures, waits for redraws already running, and resolves after their queued updates and resizing finish. It rejects if drawing or an update fails; a new figure clears that failure. Updates arriving after a failure are dropped with a warning until a new figure arrives, so a stream cannot build an unusable queue. The promise covers browser draws; it does not wait for server resampling answers requested by a preserved zoom. A resampled figure may still show its overview while that answer is in flight, so `flush()` alone cannot guarantee zoom detail in an export. For a snapshot of the figures currently available in the browser before programmatic printing:
 

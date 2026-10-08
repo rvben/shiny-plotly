@@ -253,3 +253,43 @@ older snapshots are only counted as obsolete at start if the raw socket listener
 already received a newer revision. CPU throttling (`--cpu 4` by default) is a synthetic
 control, not a device prediction. Change `--charts`, `--points`, `--snapshots`,
 `--interval-ms` and `--repeats` to match the workload. Keep generated results local.
+
+### Normal reactive dashboards
+
+```sh
+make bench-reactive-dashboard REACTIVE_DASHBOARD_ARGS="--output /tmp/reactive-dashboard.json"
+make bench-reactive-dashboard REACTIVE_DASHBOARD_ARGS="--cpu 1 --output /tmp/reactive-desktop.json"
+```
+
+`bench/reactive_dashboard.py` compares `coalesce_renders=False/True` through normal
+`render_plotly` outputs, reactive invalidation and Shiny's own transport. It builds
+12 charts, each with two NumPy-backed line traces of 1,000 points, from a shared
+slider. No figure snapshots are injected and no browser drawing or idle callbacks
+are held. Initial draws finish before measurement. Each sample uses a fresh page
+and alternates case order between repeats.
+
+Two input paths preserve Shiny's native rate policies:
+
+- **Drag-style changes:** the slider widget is updated and emits ordinary change
+  events eight times, 100ms apart. Shiny's default 250ms debounce remains active;
+  this often collapses the entire interaction to one server render per chart.
+  This is a repeatable widget-event sequence, not physical pointer automation.
+- **Animation:** click Shiny's native slider Play button, with its 100ms interval
+  and no looping. Its input binding sends continuous changes. Browser main-thread
+  work can delay its timer, so the observed change/send timestamps are retained.
+
+The benchmark checks every x/y value of every final trace, receipt of every built
+figure, the final input revision and absence of browser errors. Completion includes
+`flush()` and two animation frames. It records both total interaction duration and
+time after the last actual slider change: a shorter interaction does not imply a
+shorter settling delay. JSON includes raw input/send/receive/draw timelines, server
+figure counts and construction time (excluding serialization), figure JSON payload
+bytes (excluding WebSocket framing and other messages), and CDP main-thread task,
+script and layout duration. Those browser durations include benchmark instrumentation;
+they are not process CPU utilization.
+
+Defaults are 20 repeats and synthetic 4x CPU throttling. Median and linearly
+interpolated empirical p95 are reported; 20 samples still give only a rough tail
+estimate. `--cpu 1` supplies the unthrottled control. Adjust `--charts`, `--traces`,
+`--points`, `--steps`, `--interval-ms` and `--repeats` to match the app. The local
+WebSocket transport adds no artificial network latency. Keep generated results local.
