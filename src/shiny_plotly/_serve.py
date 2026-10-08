@@ -8,7 +8,9 @@ so it can be served with a year-long ``immutable`` cache and pre-compressed once
 
 Importing ``shiny_plotly`` wraps ``shiny.App.__init__``, so every app built after it gets a
 route for the bundle's exact path in front of Shiny's mount, and a background thread starts
-compressing the bundle once per process. Both happen while the app is being built, before it
+compressing uncached encodings once per process. A bounded disk cache shares the encodings
+across local workers and restarts, so a warm worker can serve them immediately. Route setup
+and cache loading happen while the app is being built, before it
 can serve anything, so the first request of the process is already served here; until the
 compression has finished the route serves the raw file, marked for revalidation rather than
 immutable when the client asked for an encoding that is still on its way. An app
@@ -25,7 +27,8 @@ import logging
 import os
 import sys
 import threading
-from collections.abc import Iterator
+import zlib
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +37,7 @@ from starlette.responses import FileResponse, Response
 from starlette.routing import Route
 
 from ._bundle import selection_settled
+from ._cache import CompressionCache, cache_directory, cache_key
 from ._deps import plotly_js
 
 __all__ = (
@@ -66,29 +70,46 @@ except ImportError:  # pragma: no cover - a dependency, absent only where it was
 
 
 class CompressedBundle:
-    """plotly.min.js plus its compressed encodings, produced once in the background."""
+    """plotly.min.js and its encodings, loaded from cache or produced in the background."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        stat = path.stat()
-        self.size = stat.st_size
-        # Keyed by what is on disk, like starlette's own static ETag, so a different build
-        # of the same plotly version still gets a different tag.
-        self.etag_base = hashlib.sha1(
-            f"{stat.st_size}-{stat.st_mtime_ns}".encode(), usedforsecurity=False
-        ).hexdigest()[:16]
+        self._raw: bytes | None = path.read_bytes()
+        self.size = len(self._raw)
+        # Content identity survives private-directory changes and worker restarts.
+        self.etag_base = hashlib.sha256(self._raw).hexdigest()
         self.encodings: dict[str, bytes] = {}
         # Every encoding the compression will produce, in the order it produces them.
         self.produces: tuple[str, ...] = ("br", "gzip") if brotli is not None else ("gzip",)
         self._ready = threading.Event()
         self._started = False
         self._lock = threading.Lock()
+        directory = cache_directory()
+        self._cache = None if directory is None else CompressionCache(directory)
+        settings = {
+            "br": f"brotli:q9:{getattr(brotli, '__version__', 'unavailable')}",
+            "gzip": (
+                f"gzip:q9:mtime0:python{sys.version_info[:3]}:"
+                f"zlib{zlib.ZLIB_RUNTIME_VERSION}:os{sys.platform}"
+            ),
+        }
+        self._cache_keys = {e: cache_key(self.etag_base, settings[e]) for e in self.produces}
 
     def start(self) -> None:
         with self._lock:
             if self._started:
                 return
             self._started = True
+            if self._cache is not None:
+                for encoding in self.produces:
+                    cached = self._cache.peek(self._cache_keys[encoding])
+                    if cached is not None:
+                        self.encodings[encoding] = cached
+            if len(self.encodings) == len(self.produces):
+                self._raw = None
+                self._warn_no_brotli()
+                self._ready.set()
+                return
         threading.Thread(target=self._compress, name="shiny-plotly-compress", daemon=True).start()
 
     def wait(self, timeout: float | None = None) -> bool:
@@ -100,28 +121,40 @@ class CompressedBundle:
         return self._ready.is_set()
 
     def etag(self, encoding: str | None) -> str:
-        return f'"{self.etag_base}"' if encoding is None else f'"{self.etag_base}-{encoding}"'
+        return f'"{self.etag_base}"' if encoding is None else f'"{self._cache_keys[encoding]}"'
+
+    def _warn_no_brotli(self) -> None:
+        if brotli is None:
+            logger.warning(
+                "shiny-plotly is serving plotly.min.js gzipped (%.2f MB); brotli would "
+                "be about %d%% smaller. Install brotli for it, or silence this with "
+                "logging.getLogger('shiny_plotly').setLevel(logging.ERROR).",
+                len(self.encodings["gzip"]) / 1e6,
+                BROTLI_SAVING_PERCENT,
+            )
 
     def _compress(self) -> None:
-        raw = self.path.read_bytes()
+        raw = self._raw
+        assert raw is not None
         try:
-            # brotli at quality 9 takes about as long as gzip for a quarter less output;
-            # quality 11 would take thirty times longer for another 10%.
+            producers: dict[str, Callable[[], bytes]] = {
+                "gzip": lambda: gzip.compress(raw, compresslevel=9, mtime=0),
+            }
             if brotli is not None:
-                self.encodings["br"] = brotli.compress(raw, quality=9)
-            self.encodings["gzip"] = gzip.compress(raw, compresslevel=9, mtime=0)
-            if brotli is None:
-                # Compression runs once per process, so this is said once. Without it a
-                # deployment has no way to notice it is serving the larger encoding: the
-                # bundle is compressed, cached and immutable either way, just bigger.
-                logger.warning(
-                    "shiny-plotly is serving plotly.min.js gzipped (%.2f MB); brotli would "
-                    "be about %d%% smaller. Install brotli for it, or silence this with "
-                    "logging.getLogger('shiny_plotly').setLevel(logging.ERROR).",
-                    len(self.encodings["gzip"]) / 1e6,
-                    BROTLI_SAVING_PERCENT,
+                compress_brotli = brotli.compress
+                producers["br"] = lambda: compress_brotli(raw, quality=9)
+            for encoding in self.produces:
+                if encoding in self.encodings:
+                    continue
+                produce = producers[encoding]
+                self.encodings[encoding] = (
+                    produce()
+                    if self._cache is None
+                    else self._cache.get_or_create(self._cache_keys[encoding], produce)
                 )
+            self._warn_no_brotli()
         finally:
+            self._raw = None
             self._ready.set()
 
 

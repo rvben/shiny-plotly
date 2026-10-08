@@ -455,7 +455,27 @@ A runnable version of the streaming pattern, with a pause switch and a window sl
 
 ### plotly.js on the wire
 
-Shiny serves HTML dependencies from a plain static mount: no compression, no `Cache-Control`. `plotly.min.js` is 4.9 MB, so `shiny-plotly` adds a route in front of that mount for the bundle's exact path (`/lib/plotly-<version>/plotly.min.js`) that serves it pre-compressed (brotli, 1.2 MB on the wire, or gzip at 1.5 MB where brotli is not installed) with `Cache-Control: public, max-age=31536000, immutable`, `Vary: Accept-Encoding` and an `ETag` per encoding. The URL is keyed by the plotly version, so a browser fetches each version once. Compression runs once per process, in a background thread; until it has finished the route serves the raw file, with `Cache-Control: no-cache` to a browser that asked for an encoding still being compressed, so its next visit revalidates and swaps in the compressed body rather than keeping the raw one for a year.
+Shiny serves HTML dependencies from a plain static mount: no compression, no `Cache-Control`. `plotly.min.js` is 4.9 MB, so `shiny-plotly` adds a route in front of that mount for the bundle's exact path (`/lib/plotly-<version>/plotly.min.js`) that serves it pre-compressed (brotli, 1.2 MB on the wire, or gzip at 1.5 MB where brotli is not installed) with `Cache-Control: public, max-age=31536000, immutable`, `Vary: Accept-Encoding` and an `ETag` per encoding. The URL is keyed by the plotly version, so a browser fetches each version once. Compression runs in a background thread when no shared cached encoding is available; until it has finished the route serves the raw file, with `Cache-Control: no-cache` to a browser that asked for an encoding still being compressed, so its next visit revalidates and swaps in the compressed body rather than keeping the raw one for a year.
+
+Compressed encodings are also cached on disk and shared across workers and restarts.
+A warm worker loads them before its first response, avoiding another compression pass.
+The cache lives in the user's OS cache directory (`~/Library/Caches/shiny-plotly` on macOS,
+`$XDG_CACHE_HOME/shiny-plotly` or `~/.cache/shiny-plotly` on Linux, and
+`%LOCALAPPDATA%/shiny-plotly` on Windows). Set `SHINY_PLOTLY_CACHE_DIR=/path/to/cache`
+to use another directory, such as a local persistent volume shared by app workers.
+Use a local filesystem with reliable SQLite locking; separate hosts need separate caches.
+
+Entries are keyed by the bundle's SHA-256, encoding, compression settings and codec version.
+SQLite transactions coordinate simultaneous producers and prevent partial writes; cached
+payload checksums detect corruption. The database is capped at 64 MiB and 32 encodings,
+evicting the oldest entries as needed; its transaction journal uses temporary additional
+space. An encoding larger than 8 MiB is served without being stored. Cache misses compress
+in the background as before. If the cache is busy, unavailable, full or corrupt, the app
+falls back to local compression. Set `SHINY_PLOTLY_NO_CACHE=1` to disable disk caching
+while retaining compression; `SHINY_PLOTLY_NO_COMPRESS=1` disables the route entirely.
+`make bench-compression` measures cold and warm workers over local HTTP, including the
+first asset response and bytes transferred; `COMPRESSION_ARGS="--bundle plotly-basic.min.js"`
+measures a partial bundle. These timings exclude Python imports and browser evaluation.
 
 `brotli` is a dependency, so a plain `uv add shiny-plotly` serves the smaller encoding. It is skipped under pyodide, where there is nothing to compress: a shinylive export carries its own assets and the route is not installed at all. An install that ends up without it (a lock file that predates the dependency, a platform with no wheel) falls back to gzip and logs one warning saying which encoding it is serving and what brotli would save, so a deployment can see it is shipping the larger bundle; `logging.getLogger("shiny_plotly").setLevel(logging.ERROR)` silences it.
 

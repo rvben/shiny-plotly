@@ -1,5 +1,5 @@
 .PHONY: sync lock-check browsers lint fmt typecheck test test-browser test-all build check-wheel \
-	check-floor bench bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
+	check-floor bench bench-compression bench-events bench-resample bench-realworld bench-updates bench-drawing check version check-version release-notes publish clean \
 	site site-check site-verify release-patch release-minor release-major
 
 # Every CI step is one of these targets; the workflows only call make.
@@ -92,6 +92,9 @@ bench:
 
 # Measures what a selected event costs on a dense trace, capped by max_event_points and
 # uncapped (bench/events.py); the numbers behind that option's default.
+bench-compression:
+	uv run python -m bench.compression $(COMPRESSION_ARGS)
+
 bench-events:
 	uv run python -m bench.events $(BENCH_ARGS)
 

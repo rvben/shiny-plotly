@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Compressed plotly.js encodings persist in a bounded, transactional cache shared across local workers and restarts. Warm starts serve cached encodings immediately, with content- and codec-keyed ETags. `SHINY_PLOTLY_CACHE_DIR` sets the location and `SHINY_PLOTLY_NO_CACHE=1` disables persistence; unavailable storage falls back to background compression.
+
 - `use_plotly_bundle(path)` and `SHINY_PLOTLY_BUNDLE` select a partial or custom plotly.js dist bundle matching the installed plotly's target version. The process-wide choice is fixed by the first plotly dependency, and the validated bytes are served from a private snapshot under a variant- and content-keyed URL with the existing compression and immutable caching.
 - Figures, animation frames, `fig_to_ui` fragments, added traces and trace-type updates are checked against the selected bundle's trace types. Missing types raise `ValueError` on the server, including types in NumPy updates and explicit resets to scatter.
 
