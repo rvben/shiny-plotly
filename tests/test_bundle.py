@@ -371,3 +371,13 @@ def test_version_mismatch_gives_an_actionable_remedy(tmp_path, variant):
     else:
         assert f"Rebuild this custom bundle with plotly.js {PLOTLYJS}" in str(raised.value)
         assert "jsdelivr" not in str(raised.value)
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_custom_bundle_with_quoted_registration_keys_is_found(tmp_path, quote):
+    path = tmp_path / "custom.js"
+    path.write_text(
+        f"/** plotly.js (Custom Build) v{PLOTLYJS} */\n"
+        f"{{{quote}moduleType{quote}: {quote}trace{quote}, {quote}name{quote}: {quote}bar{quote}}}"
+    )
+    assert _bundle.read_bundle(path).trace_types == {"bar"}

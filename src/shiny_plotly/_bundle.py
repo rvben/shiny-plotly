@@ -28,8 +28,10 @@ __all__ = (
 
 ENV_VAR = "SHINY_PLOTLY_BUNDLE"
 _BANNER = re.compile(r"plotly\.js(?: \((?P<variant>[^)]*)\))? v(?P<version>\d+\.\d+\.\d+\S*)")
+# Start with a literal so re can skip directly to registration sites. A quoted
+# key still matches from inside its opening quote, including in custom builds.
 _TRACE = re.compile(
-    rb"""["']?moduleType["']?\s*:\s*["']trace["']\s*,\s*["']?name["']?\s*:\s*["'](\w+)["']"""
+    rb"""moduleType["']?\s*:\s*["']trace["']\s*,\s*["']?name["']?\s*:\s*["'](\w+)["']"""
 )
 _BANNER_BYTES = 1024
 _DEFAULT_TRACE = "scatter"
